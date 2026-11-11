@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#FFC107">
+    <meta name="description" content="Khám phá điểm tham quan và nghe thuyết minh theo vị trí GPS.">
+    <title>Du lịch đa ngôn ngữ</title>
+    <link rel="manifest" href="./manifest.json">
+    <link rel="icon" href="./icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+    <link rel="stylesheet" href="./styles.css?v=7">
+  </head>
+  <body>
+    <div id="network-banner" class="network-banner" role="status" hidden>Không có kết nối mạng</div>
+
+    <main id="app">
+      <section id="welcome-screen" class="welcome-screen" aria-labelledby="welcome-title">
+        <div class="brand-mark" aria-hidden="true">D</div>
+        <p class="eyebrow">AUDIO GUIDE · GPS</p>
+        <h1 id="welcome-title">Khám phá theo nhịp riêng</h1>
+        <p class="welcome-copy">Chọn ngôn ngữ thuyết minh. Khi cho phép vị trí, ứng dụng sẽ nhận biết các điểm tham quan gần bạn.</p>
+        <h2>Ngôn ngữ</h2>
+        <div id="language-options" class="language-options" aria-label="Chọn ngôn ngữ">
+          <button class="language-choice" type="button" data-language="vi">Tiếng Việt</button>
+          <button class="language-choice" type="button" data-language="en">English</button>
+          <button class="language-choice" type="button" data-language="ja">日本語</button>
+          <button class="language-choice" type="button" data-language="ko">한국어</button>
+          <button class="language-choice" type="button" data-language="zh">中文</button>
+        </div>
+        <button id="enter-map" class="button button-primary button-full" type="button" disabled>Tiếp tục</button>
+        <p class="privacy-note">Vị trí chỉ được dùng để nhận biết điểm tham quan trong lúc bạn mở hành trình.</p>
+      </section>
+
+      <section id="main-screen" class="main-screen" hidden>
+        <header class="topbar">
+          <a class="brand" href="./index.html" aria-label="Trang chủ">
+            <span class="brand-mark brand-mark-small" aria-hidden="true">D</span>
+            <span><strong>THUYẾT MINH</strong><small>HƯỚNG DẪN THEO VỊ TRÍ</small></span>
+          </a>
+          <label class="language-current">
+            <span class="sr-only">Ngôn ngữ</span>
+            <select id="current-language" aria-label="Ngôn ngữ thuyết minh">
+              <option value="vi">VI</option>
+              <option value="en">EN</option>
+              <option value="ja">JA</option>
+              <option value="ko">KO</option>
+              <option value="zh">ZH</option>
+            </select>
+          </label>
+        </header>
+
+        <div id="app-error" class="inline-error" role="alert" hidden></div>
+
+        <section id="location-prompt" class="location-prompt" aria-live="polite">
+          <div>
+            <strong id="location-title">Bật định vị để bắt đầu</strong>
+            <p id="location-description">Ứng dụng cần quyền vị trí để xác định điểm tham quan quanh bạn.</p>
+          </div>
+          <button id="enable-location" class="button button-secondary" type="button">Bật định vị</button>
+        </section>
+
+        <section id="map-section" class="map-section" aria-label="Bản đồ điểm tham quan">
+          <div class="section-heading map-heading">
+            <div><p class="eyebrow">KHÁM PHÁ XUNG QUANH</p><h1>Bản đồ</h1></div>
+            <span id="poi-total" class="count-pill">Đang tải…</span>
+          </div>
+          <div id="map" role="application" aria-label="Bản đồ tương tác"></div>
+          <div id="map-fallback" class="map-fallback" hidden>Bản đồ chưa tải được. Danh sách điểm tham quan vẫn khả dụng bên dưới.</div>
+        </section>
+
+        <section id="selected-poi" class="selected-poi" aria-live="polite">
+          <p class="eyebrow">ĐIỂM ĐƯỢC CHỌN</p>
+          <div id="poi-detail-content" class="poi-detail-content">
+            <p class="empty-state">Chọn một điểm trên bản đồ hoặc danh sách để xem thông tin.</p>
+          </div>
+        </section>
+
+        <section id="poi-list-section" class="poi-list-section">
+          <div class="section-heading">
+            <div><p class="eyebrow">GỢI Ý CHO BẠN</p><h2>Điểm tham quan</h2></div>
+            <span id="list-total" class="count-pill">0 điểm</span>
+          </div>
+          <div id="poi-list" class="poi-list" aria-live="polite">
+            <p class="empty-state">Đang tải danh sách điểm tham quan…</p>
+          </div>
+        </section>
+
+        <section id="aux-panel" class="aux-panel" hidden aria-live="polite"></section>
+      </section>
+    </main>
+
+    <section id="audio-player" class="audio-player" aria-label="Trình phát thuyết minh" hidden>
+      <div class="player-title">
+        <span class="playing-indicator" aria-hidden="true"></span>
+        <div class="player-track"><span class="eyebrow">ĐANG PHÁT</span><strong id="player-poi-name">Chưa có nội dung</strong></div>
+        <button id="player-toggle" class="icon-button player-toggle" type="button" aria-label="Phát" disabled>▶</button>
+      </div>
+      <div class="player-controls">
+        <button id="seek-back" class="text-button" type="button" aria-label="Tua lùi 10 giây" disabled>−10</button>
+        <input id="audio-progress" type="range" min="0" max="100" value="0" aria-label="Tiến trình phát" disabled>
+        <button id="seek-forward" class="text-button" type="button" aria-label="Tua tới 10 giây" disabled>+10</button>
+        <span id="audio-time" class="audio-time">0:00</span>
+      </div>
+      <audio id="audio-element" preload="none"></audio>
+    </section>
+
+    <nav id="bottom-nav" class="bottom-nav" aria-label="Điều hướng chính" hidden>
+      <button class="nav-item is-active" type="button" data-view="map" aria-current="page"><span aria-hidden="true">⌖</span><span>Bản đồ</span></button>
+      <button class="nav-item" type="button" data-view="amenities"><span aria-hidden="true">♨</span><span>Ẩm thực</span></button>
+      <button class="nav-item" type="button" data-view="assistant"><span aria-hidden="true">✦</span><span>Trợ lý AI</span></button>
+      <button class="nav-item" type="button" data-view="groups"><span aria-hidden="true">◎</span><span>Nhóm</span></button>
+    </nav>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js" crossorigin=""></script>
+    <script src="./app.js?v=8" defer></script>
+  </body>
+</html>

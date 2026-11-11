@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: multilingual-tourist-guide-api
+    runtime: python
+    plan: free
+    autoDeploy: false
+    buildCommand: python -m pip install -e ./backend-api
+    startCommand: cd backend-api && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: ENVIRONMENT
+        value: production
+      - key: DEMO_MODE
+        value: "false"
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: MONGODB_URL
+        sync: false
+      - key: MONGODB_DATABASE
+        value: tour_guide
+      - key: REDIS_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ADMIN_SEED_EMAIL
+        sync: false
+      - key: ADMIN_SEED_PASSWORD
+        sync: false

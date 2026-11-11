@@ -1,0 +1,14 @@
+TRANG QUẢN TRỊ (Dành cho Admin)
+Link khuyến nghị: http://localhost:8000/login.html
+Tài khoản đăng nhập được cấu hình trong backend-api\.env và tạo bằng lệnh seed.
+Không lưu hoặc chia sẻ mật khẩu trong tệp hướng dẫn này.
+
+TRANG KHÁCH DU LỊCH (Dành cho User)
+Link khuyến nghị: http://localhost:8000/tourist-pwa/tour.html
+Ẩm thực (giao diện thử nghiệm): http://localhost:8000/experimental-tourist/
+Mã QR truy cập: http://localhost:8000/access-qr
+
+LƯU Ý:
+1. Làm theo KHOI_DONG_WEB.txt; cần MongoDB và Redis đang chạy trước khi sử dụng.
+2. Link Cloudflare công khai thay đổi mỗi lần tạo tunnel mới; dùng HTTPS của tunnel trên điện thoại để bật GPS.
+3. Dữ liệu được lưu theo cấu hình MongoDB trong backend-api\.env; hãy sao lưu database và thư mục backend-api\uploads định kỳ.

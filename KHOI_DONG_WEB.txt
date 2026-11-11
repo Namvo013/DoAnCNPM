@@ -1,0 +1,99 @@
+HƯỚNG DẪN KHỞI ĐỘNG LẠI WEB
+
+Dùng khi tắt máy hoặc đã đóng các cửa sổ Backend/Tunnel.
+Mở 2 cửa sổ PowerShell; nếu cần dùng GPS trên điện thoại thì mở thêm cửa sổ thứ 3.
+
+THƯ MỤC DỰ ÁN
+C:\Users\User\Desktop\TMDNN\Nhom2ThuyetMinhDaNgonNgu
+
+BƯỚC 1 - KHỞI ĐỘNG MONGODB (TỰ ĐỘNG)
+MongoDB phải chạy trước Backend. Mở PowerShell bằng quyền Administrator nếu cần.
+Dán nguyên khối lệnh sau để tự kiểm tra, tự bật MongoDB (nếu đang tắt) và kiểm tra kết nối:
+
+$svc = Get-Service -Name MongoDB -ErrorAction SilentlyContinue
+if (-not $svc) {
+  Write-Host "Khong tim thay dich vu MongoDB. Hay cai MongoDB Server (Compass chi la cong cu xem du lieu)." -ForegroundColor Red
+} else {
+  if ($svc.Status -ne 'Running') { Start-Service -Name MongoDB; Start-Sleep -Seconds 3 }
+  Get-Service -Name MongoDB | Select-Object Name, Status
+  if (Test-NetConnection -ComputerName localhost -Port 27017 -WarningAction SilentlyContinue) {
+    Write-Host "MongoDB san sang tai mongodb://localhost:27017" -ForegroundColor Green
+  } else {
+    Write-Host "Chua ket noi duoc cong 27017. Cho vai giay roi kiem tra lai." -ForegroundColor Yellow
+  }
+}
+
+Backend tự đọc địa chỉ kết nối từ backend-api\.env (MONGODB_URL=mongodb://localhost:27017, cơ sở dữ liệu tour_guide).
+Redis cũng phải chạy theo REDIS_URL trong backend-api\.env (mặc định redis://localhost:6379/0). Kiểm tra nhanh:
+  Test-NetConnection -ComputerName localhost -Port 6379
+Nếu TcpTestSucceeded=False, hãy khởi động Redis theo cách đã cài trên máy (dịch vụ hoặc Docker) rồi kiểm tra lại.
+Nếu không tìm thấy dịch vụ MongoDB, hãy kiểm tra MongoDB Server đã được cài đặt và đang chạy. MongoDB Compass chỉ là công cụ xem dữ liệu, không thay thế MongoDB Server.
+
+BƯỚC 2 - KHỞI ĐỘNG BACKEND
+Mở cửa sổ PowerShell thứ nhất và chạy:
+cd C:\Users\User\Desktop\TMDNN\Nhom2ThuyetMinhDaNgonNgu\backend-api
+& .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+Giữ cửa sổ này mở. Chờ đến khi Uvicorn báo đang chạy.
+
+BƯỚC 3 - MỞ TRANG WEB
+Mở trên máy tính:
+Trang quản trị: http://localhost:8000/login.html
+Trang khách:    http://localhost:8000/tourist-pwa/tour.html
+Ẩm thực thử nghiệm: http://localhost:8000/experimental-tourist/
+Tài liệu API:   http://localhost:8000/docs
+Kiểm tra dịch vụ: http://localhost:8000/api/health
+
+Backend phục vụ cả trang web; đây là cách khởi động khuyến nghị. Chỉ khi cần phát triển giao diện riêng mới mở thêm cửa sổ PowerShell và chạy:
+cd C:\Users\User\Desktop\TMDNN\Nhom2ThuyetMinhDaNgonNgu\admin-dashboard
+py -m http.server 5500 --bind 0.0.0.0
+Sau đó mở: http://localhost:5500/login.html
+Không chạy http.server trên cổng 8000 vì cổng này do Backend sử dụng.
+
+BƯỚC 4 - DÙNG GPS TRÊN ĐIỆN THOẠI (CẦN HTTPS)
+GPS trên điện thoại thường không hoạt động trên địa chỉ HTTP/IP nội bộ. Cần dùng Cloudflare Tunnel:
+Mở cửa sổ PowerShell thứ ba và chạy:
+& "C:\Program Files (x86)\cloudflared\cloudflared.exe" tunnel --url http://127.0.0.1:8000 --protocol http2 2>&1 | Select-String "trycloudflare"
+
+Cờ --protocol http2 bắt buộc cloudflared đi qua TCP 443 thay vì QUIC/UDP cổng 7844 (tránh bị nhà mạng chặn UDP).
+Chờ dòng lệnh hiện URL bắt đầu bằng https:// và kết thúc bằng trycloudflare.com.
+Trên máy tính, mở URL đó kèm /access-qr để hiển thị mã QR truy cập trang khách. Ví dụ:
+https://ten-duong-dan.trycloudflare.com/access-qr
+
+Quét mã bằng điện thoại và chọn "Cho phép" khi trình duyệt hỏi quyền vị trí.
+Điện thoại cần có Internet và dịch vụ Vị trí/GPS đang bật.
+Để mở giao diện khách có mục Ẩm thực thử nghiệm, dùng URL tunnel kèm /experimental-tourist/ thay cho /access-qr.
+Giữ cửa sổ Backend và Cloudflare Tunnel mở trong lúc sử dụng.
+
+XỬ LÝ LỖI CLOUDFLARE (DNS i/o timeout)
+Nếu thấy lỗi dạng:
+  ERR Failed to initialize DNS local resolver error="lookup region1.v2.argotunnel.com: i/o timeout"
+thì DNS của router không phản hồi truy vấn của cloudflared. Cách sửa - đổi DNS card mạng sang Cloudflare:
+
+Cách 1 - Qua giao diện (KHÔNG cần quyền admin, dễ nhất):
+  Settings > Network & Internet > Wi-Fi > bấm tên mạng đang kết nối
+  > DNS server assignment > Edit > chọn Manual > bật IPv4
+  > Preferred DNS: 1.1.1.1  |  Alternate DNS: 1.0.0.1  > Save
+
+Cách 2 - Bằng PowerShell (PHẢI mở Run as administrator):
+  Get-NetAdapter
+  Set-DnsClientServerAddress -InterfaceAlias "Wi-Fi" -ServerAddresses ("1.1.1.1","1.0.0.1")
+  Clear-DnsClientCache
+  ipconfig /flushdns
+
+Sau khi đổi DNS, chạy lại lệnh tunnel ở BƯỚC 4.
+Nếu vẫn lỗi: tắt VPN/proxy/phần mềm diệt virus, hoặc đổi sang mạng khác (phát WiFi từ điện thoại).
+
+QUAN TRỌNG
+- Tunnel miễn phí là đường dẫn tạm thời; mỗi lần khởi động lại có thể được cấp URL khác. Hãy mở /access-qr trên URL mới để hiển thị mã QR cập nhật.
+- URL Tunnel công khai trên Internet; chỉ dùng thử, không chia sẻ URL. Trang quản trị vẫn cần đăng nhập.
+- Nếu tunnel cũ vẫn chạy, đóng đúng cửa sổ PowerShell đã khởi động tunnel trước khi chạy lại.
+- Tắt cửa sổ Backend hoặc Tunnel sẽ làm web/tunnel tạm thời không truy cập được; dữ liệu MongoDB và tệp ảnh trong thư mục dự án không tự động bị xóa.
+- Nếu Windows Firewall hỏi, cho phép Python/Uvicorn trên mạng riêng (Private network).
+- Tự động dịch mặc định dùng dịch vụ miễn phí (cần Internet, KHÔNG cần khóa API).
+  Nếu muốn chất lượng cao hơn, thêm GEMINI_API_KEY vào backend-api\.env rồi khởi động lại Backend; không gửi khóa API qua chat.
+- Không cần tạo lại .venv mỗi lần khởi động. Chỉ cài mới nếu môi trường Python bị lỗi:
+  cd C:\Users\User\Desktop\TMDNN\Nhom2ThuyetMinhDaNgonNgu\backend-api
+  py -3 -m venv .venv
+  & .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+- Xem MongoDB bằng Compass với kết nối: mongodb://localhost:27017

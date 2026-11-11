@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0b0b">
+  <title>Quản trị | Du lịch đa ngôn ngữ</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <link rel="stylesheet" href="styles.css?v=15">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="index.html">
+        <span class="brand-mark">D</span>
+        <span><strong>THUYẾT MINH</strong><small>DU LỊCH ĐA NGÔN NGỮ</small></span>
+      </a>
+      <p class="nav-heading">KHÔNG GIAN LÀM VIỆC</p>
+      <nav id="main-nav" aria-label="Điều hướng chính"></nav>
+      <div class="sidebar-bottom">
+        <div class="connection"><i id="connection-dot"></i><span id="connection-label">Đang kết nối...</span></div>
+        <button id="logout-button" class="button button-ghost button-wide" type="button">Đăng xuất</button>
+      </div>
+    </aside>
+    <main class="main-area">
+      <header class="topbar">
+        <div><p class="eyebrow" id="page-eyebrow">TỔNG QUAN</p><h1 id="page-title">Tổng quan</h1></div>
+        <div class="topbar-actions">
+          <a class="button button-outline user-view-link" href="tourist-pwa/tour.html" aria-label="Chuyển sang trang khách du lịch">↗ Trang khách</a>
+          <div class="user-chip"><span class="avatar" id="user-avatar">A</span><span><strong id="user-name">Quản trị viên</strong><small id="user-role">Quản trị</small></span></div>
+        </div>
+      </header>
+
+      <section class="page-section active" id="section-overview">
+        <div class="welcome-banner">
+          <div><p class="eyebrow">TRUNG TÂM ĐIỀU HÀNH</p><h2>Xin chào, <span id="welcome-name">quản trị viên</span></h2><p class="muted">Theo dõi hoạt động du lịch và quản lý nội dung tại các điểm tham quan.</p></div>
+        </div>
+        <div class="stat-grid">
+          <article class="stat-card"><span class="stat-icon">●</span><p>Khách đang trực tuyến</p><strong id="stat-online">0</strong><small>Cập nhật theo thời gian thực</small></article>
+          <article class="stat-card" id="stat-visits-card" hidden><span class="stat-icon">↗</span><p>Lượt truy cập hôm nay</p><strong id="stat-visits">—</strong><small>Số phiên kết nối trong ngày</small></article>
+          <article class="stat-card"><span class="stat-icon">⌖</span><p>Điểm tham quan</p><strong id="stat-pois">—</strong><small>Điểm đang hoạt động</small></article>
+        </div>
+        <article class="panel"><div class="panel-heading"><div><p class="eyebrow">VẬN HÀNH</p><h2>Trạng thái kết nối</h2></div><span class="live-badge"><i></i> REALTIME</span></div><div class="connection-summary"><span id="overview-connection">Đang chờ kết nối WebSocket...</span><span id="overview-updated" class="muted"></span></div></article>
+      </section>
+
+      <section class="page-section" id="section-pois">
+        <div class="section-heading poi-section-heading"><div><p class="eyebrow">NỘI DUNG ĐỊA ĐIỂM</p><h2>Điểm tham quan</h2><p class="muted">Quản lý nội dung, hình ảnh, tọa độ và thuyết minh cho từng điểm.</p></div><button id="add-poi-button" class="button button-primary" type="button">＋ Thêm điểm tham quan</button></div>
+        <article class="panel table-panel"><div class="table-toolbar"><span id="poi-total" class="muted">Đang tải...</span><button id="poi-refresh" class="button button-outline" type="button">Làm mới</button></div><div class="table-scroll"><table><thead><tr><th>ĐIỂM THAM QUAN</th><th>DANH MỤC</th><th>VỊ TRÍ</th><th>TRẠNG THÁI</th><th></th></tr></thead><tbody id="poi-table"></tbody></table></div><div class="pagination"><button id="poi-prev" class="button button-outline" type="button">Trước</button><span id="poi-page-label">Trang 1</span><button id="poi-next" class="button button-outline" type="button">Sau</button></div></article>
+      </section>
+
+      <section class="page-section" id="section-monitor">
+        <div class="section-heading"><div><p class="eyebrow">THEO DÕI TRỰC TIẾP</p><h2>Giám sát khách</h2><p class="muted">Khách được xem là ngoại tuyến sau 45 giây không có heartbeat.</p></div><span class="live-badge"><i></i> LIVE</span></div>
+        <div class="monitor-grid"><article class="panel"><div class="panel-heading"><div><h3>Khách theo điểm tham quan</h3><p class="muted">Cảnh báo khi vượt quá 50 khách.</p></div><strong id="monitor-online" class="online-total">0</strong></div><div class="table-scroll"><table><thead><tr><th>ĐIỂM THAM QUAN</th><th>KHÁCH</th><th>TRẠNG THÁI</th></tr></thead><tbody id="poi-presence-table"></tbody></table></div></article><article class="panel"><div class="panel-heading"><div><h3>Bản đồ nhiệt</h3><p class="muted">Vị trí khách gửi qua heartbeat.</p></div><button id="heatmap-refresh" class="button button-outline" type="button">Làm mới</button></div><div id="heatmap-map" class="map map-monitor"></div><p id="heatmap-map-status" class="map-status" role="status"></p></article></div>
+      </section>
+
+      <section class="page-section" id="section-reports">
+        <div class="section-heading"><div><p class="eyebrow">PHÂN TÍCH DỮ LIỆU</p><h2>Báo cáo thống kê</h2><p class="muted">Lượt tham quan được tính theo sự kiện vào POI.</p></div></div>
+        <article class="panel"><form id="report-form" class="report-filter"><label>Từ ngày<input id="report-start" type="date" required></label><label>Đến ngày<input id="report-end" type="date" required></label><button class="button button-primary" type="submit">Xem báo cáo</button><div class="export-actions"><button class="button button-outline" data-format="xlsx" type="button">Xuất Excel</button><button class="button button-outline" data-format="pdf" type="button">Xuất PDF</button><button class="button button-outline" data-format="csv" type="button">Xuất CSV</button></div></form><div class="report-total">Tổng lượt <strong id="report-total">—</strong></div><div class="charts-grid"><div><h3>Lượt theo điểm tham quan</h3><canvas id="poi-chart"></canvas></div><div><h3>Lượt theo ngày</h3><canvas id="day-chart"></canvas></div></div><div class="table-scroll"><table><thead><tr><th>NGÔN NGỮ</th><th>LƯỢT</th></tr></thead><tbody id="language-report"></tbody></table></div></article>
+      </section>
+
+      <section class="page-section" id="section-admins">
+        <div class="section-heading"><div><p class="eyebrow">PHÂN QUYỀN TRUY CẬP</p><h2>Tài khoản quản trị</h2><p class="muted">Chỉ super admin có quyền quản lý tài khoản.</p></div><button id="add-admin-button" class="button button-primary" type="button">＋ Thêm tài khoản</button></div>
+        <article class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>TÀI KHOẢN</th><th>VAI TRÒ</th><th>TRẠNG THÁI</th><th>THAO TÁC</th></tr></thead><tbody id="admin-table"></tbody></table></div></article>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="poi-dialog" class="modal">
+    <form id="poi-form" method="dialog">
+      <div class="modal-heading"><div><p class="eyebrow">THÔNG TIN ĐỊA ĐIỂM</p><h2 id="poi-dialog-title">Thêm điểm tham quan</h2></div><button class="icon-button" data-close-dialog="poi-dialog" type="button" aria-label="Đóng">×</button></div>
+      <div class="modal-body">
+        <input name="poi_id" type="hidden">
+        <div class="form-row"><label>Tên điểm tham quan<input name="name" required maxlength="200"></label><label>Danh mục<input name="category" required maxlength="100"></label></div>
+        <p id="poi-field-translation-status" class="muted compact" role="status" aria-live="polite">Tên và danh mục tiếng Việt sẽ được tự động dịch sang English, 日本語, 한국어 và 中文. Bạn có thể sửa lại nếu bản dịch chưa đúng.</p>
+        <div id="poi-field-translations" class="field-translations"></div>
+        <label>Ảnh (URL)<input name="image_url" type="url" maxlength="2048" autocomplete="url"></label>
+        <div class="image-upload-row">
+          <button id="poi-image-select-button" class="button button-outline image-upload-button" type="button">Chọn ảnh từ máy</button>
+          <input id="poi-image-file" type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden>
+          <button id="poi-image-upload-button" class="button button-primary image-upload-submit" type="button" disabled>Tải ảnh lên</button>
+          <span class="muted compact">JPG, PNG, WebP hoặc GIF · tối đa 10 MB</span>
+        </div>
+        <p id="poi-image-upload-status" class="muted compact" role="status" aria-live="polite"></p>
+        <img id="poi-image-preview" class="poi-image-preview" alt="Xem trước ảnh điểm tham quan" hidden>
+        <div class="form-row"><label>Vĩ độ<input name="latitude" type="number" step="any" min="-90" max="90" required></label><label>Kinh độ<input name="longitude" type="number" step="any" min="-180" max="180" required></label><label>Bán kính geofence (m)<input name="geofence_radius_m" type="number" min="10" max="1000" value="50" required></label></div>
+        <p class="muted compact">Tìm địa chỉ hoặc địa danh ở Việt Nam, chọn kết quả để chuyển ghim; có thể bấm bản đồ hoặc kéo ghim để chỉnh tọa độ. Tìm kiếm dùng dữ liệu OpenStreetMap qua Photon.</p>
+        <div class="poi-map-search"><input id="poi-map-search-input" type="search" maxlength="200" placeholder="Ví dụ: Hồ Gươm, Hà Nội" aria-label="Tìm địa điểm trên bản đồ"><button id="poi-map-search-button" class="button button-outline" type="button">Tìm</button></div>
+        <p id="poi-map-search-status" class="map-status" role="status"></p><div id="poi-map-search-results" class="map-search-results" aria-label="Kết quả tìm kiếm"></div><div id="poi-picker-map" class="map map-picker"></div><p id="picker-map-status" class="map-status" role="status"></p>
+        <label>Nội dung tiếng Việt (bắt buộc)<textarea name="content_vi" rows="3" required maxlength="50000"></textarea></label>
+        <p id="poi-translation-status" class="muted compact" role="status" aria-live="polite">Khi ngừng nhập tiếng Việt, bản dịch English, 日本語, 한국어 và 中文 sẽ tự động cập nhật và thay thế bản dịch cũ.</p>
+        <div class="form-row"><label>English<textarea name="content_en" rows="3" maxlength="50000"></textarea></label><label>日本語<textarea name="content_ja" rows="3" maxlength="50000"></textarea></label></div>
+        <div class="form-row"><label>한국어<textarea name="content_ko" rows="3" maxlength="50000"></textarea></label><label>中文<textarea name="content_zh" rows="3" maxlength="50000"></textarea></label></div>
+        <label class="checkbox-label"><input name="is_active" type="checkbox" checked> Đang hoạt động</label>
+        <div id="poi-audio-tools" class="audio-tools" hidden><h3>Thuyết minh âm thanh</h3><div id="poi-audio-list"></div></div>
+      </div>
+      <div class="modal-footer"><button class="button button-outline" data-close-dialog="poi-dialog" type="button">Hủy</button><button id="poi-save-button" class="button button-primary" type="submit">Lưu điểm tham quan</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="admin-dialog" class="modal modal-small"><form id="admin-form" method="dialog"><div class="modal-heading"><div><p class="eyebrow">TÀI KHOẢN QUẢN TRỊ</p><h2 id="admin-dialog-title">Thêm tài khoản</h2></div><button class="icon-button" data-close-dialog="admin-dialog" type="button" aria-label="Đóng">×</button></div><div class="modal-body stack-form"><input name="admin_id" type="hidden"><label>Email<input name="email" type="email" required maxlength="254"></label><label>Tên hiển thị<input name="display_name" required maxlength="200"></label><label>Vai trò<select name="role"><option value="area_operator">area_operator — Vận hành khu vực</option><option value="content_editor">content_editor — Biên tập nội dung</option><option value="analytics_viewer">analytics_viewer — Xem báo cáo</option><option value="super_admin">super_admin — Quản trị cao nhất</option></select></label><label id="new-password-field">Mật khẩu (tối thiểu 12 ký tự)<input name="password" type="password" minlength="12" autocomplete="new-password"></label></div><div class="modal-footer"><button class="button button-outline" data-close-dialog="admin-dialog" type="button">Hủy</button><button class="button button-primary" type="submit">Lưu tài khoản</button></div></form></dialog>
+
+  <div id="toast-region" class="toast-region" aria-live="polite"></div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="dashboard.js?v=22"></script>
+</body>
+</html>

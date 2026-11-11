@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0b0b">
+  <title>Đăng nhập | Du lịch đa ngôn ngữ</title>
+  <link rel="stylesheet" href="styles.css?v=12">
+</head>
+<body class="login-page">
+  <main class="login-card">
+    <a class="brand brand-login" href="login.html" aria-label="Trang đăng nhập">
+      <span class="brand-mark">D</span>
+      <span><strong>THUYẾT MINH</strong><small>DU LỊCH ĐA NGÔN NGỮ</small></span>
+    </a>
+    <p class="eyebrow">KHU VỰC QUẢN TRỊ</p>
+    <h1>Chào mừng trở lại</h1>
+    <p class="muted">Đăng nhập để quản lý nội dung và vận hành điểm đến.</p>
+    <form id="login-form" class="stack-form">
+      <label>Email quản trị<input name="email" type="email" autocomplete="username" required maxlength="254"></label>
+      <label>Mật khẩu<input name="password" type="password" autocomplete="current-password" required></label>
+      <button class="button button-primary button-wide" type="submit">Đăng nhập</button>
+      <p id="login-error" class="form-error" role="alert" hidden></p>
+    </form>
+    <p class="login-foot muted">Phiên đăng nhập được bảo vệ bằng cookie HttpOnly.</p>
+  </main>
+  <script src="login.js?v=2"></script>
+</body>
+</html>

@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0b0b">
+  <meta name="description" content="Thuyết minh du lịch tự động theo vị trí GPS.">
+  <title>Thuyết minh theo vị trí</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <link rel="stylesheet" href="tour.css?v=24">
+</head>
+<body>
+  <section id="language-gate" class="language-gate">
+    <section class="language-gate-card">
+      <p class="eyebrow" data-i18n="tagline">HƯỚNG DẪN ÂM THANH · GPS</p>
+      <h1 data-i18n="gateHeading">Chọn ngôn ngữ</h1>
+      <p class="intro-copy" data-i18n="gateCopy">Hãy chọn ngôn ngữ thuyết minh trước khi bắt đầu khám phá.</p>
+      <div class="language-choice-container">
+        <span data-i18n="languageLabel">Ngôn ngữ thuyết minh</span>
+        <select id="initial-language-select" aria-label="Chọn ngôn ngữ thuyết minh" data-i18n-aria-label="languageSelectAria">
+          <option value="vi">Tiếng Việt</option>
+          <option value="en">English</option>
+          <option value="ja">日本語</option>
+          <option value="ko">한국어</option>
+          <option value="zh">中文</option>
+        </select>
+      </div>
+      <button id="enter-tour-button" class="start-button" type="button" data-i18n="continue">Tiếp tục</button>
+    </section>
+  </section>
+
+  <main id="tour-shell" class="tour-shell" hidden>
+    <header class="tour-header">
+      <div class="header-left">
+        <button id="exit-tour-btn" class="icon-btn" title="Quay lại màn hình chính" data-i18n-title="exitTour">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+        <a class="tour-brand" href="javascript:void(0)"><span class="brand-mark">D</span><span><strong data-i18n="brand">THUYẾT MINH</strong><small data-i18n="brandSubtitle">HƯỚNG DẪN THEO VỊ TRÍ</small></span></a>
+      </div>
+      <div class="language-select">
+        <span data-i18n="languageLabelShort">Ngôn ngữ</span>
+        <select id="language-select" aria-label="Chọn ngôn ngữ thuyết minh" data-i18n-aria-label="languageSelectAria">
+          <option value="vi">Tiếng Việt</option>
+          <option value="en">English</option>
+          <option value="ja">日本語</option>
+          <option value="ko">한국어</option>
+          <option value="zh">中文</option>
+        </select>
+      </div>
+    </header>
+
+    <section class="intro-card">
+      <p class="eyebrow" data-i18n="tagline">HƯỚNG DẪN ÂM THANH · GPS</p>
+      <h1 data-i18n="introHeading">Hành trình di sản trong tầm tay</h1>
+      <p class="intro-copy" data-i18n="introCopy">Khám phá câu chuyện đằng sau mỗi điểm đến với hướng dẫn viên ảo tự động kích hoạt qua GPS. Chỉ cần cấp quyền vị trí, âm thanh thuyết minh sẽ tự động vang lên ngay khi bạn bước tới. Hãy bắt đầu hành trình cảm xúc của riêng bạn ngay bây giờ.</p>
+      <button id="start-button" class="start-button" type="button" data-i18n="start">◎　Bắt đầu hành trình</button>
+      <p class="privacy-note" data-i18n="privacy">Vị trí chỉ được dùng để xác định điểm tham quan gần bạn trong lúc mở hành trình.</p>
+    </section>
+
+    <section class="map-section" aria-labelledby="map-title">
+      <div class="section-heading map-heading">
+        <div><p class="eyebrow" data-i18n="mapEyebrow">BẢN ĐỒ HÀNH TRÌNH</p><h2 id="map-title" data-i18n="mapTitle">Điểm tham quan quanh bạn</h2></div>
+        <div class="map-actions">
+          <span id="map-status" class="map-status">Bật GPS để tìm vị trí</span>
+          <button id="recenter-map" class="map-recenter" type="button" data-i18n="recenterMap" disabled>◎　Về vị trí của tôi</button>
+        </div>
+      </div>
+      <div id="tour-map" role="application" aria-label="Bản đồ các điểm tham quan" data-i18n-aria-label="mapAria"></div>
+      <p id="map-message" class="map-message" role="status" hidden></p>
+    </section>
+
+    <section class="now-playing panel" aria-live="polite">
+      <div class="playing-heading"><span class="pulse-dot"></span><span id="gps-status" data-i18n="gpsOff">Chưa bật định vị</span></div>
+      <p class="eyebrow" data-i18n="poiNearYou">ĐIỂM GẦN BẠN</p>
+      <h2 id="poi-title" data-i18n="ready">Sẵn sàng khám phá</h2>
+      <img id="poi-image" class="poi-image" alt="" hidden>
+      <p id="poi-content" class="poi-content" data-i18n="locationPrompt">Cho phép truy cập vị trí để thiết bị tự nhận biết khi bạn đến gần một điểm tham quan.</p>
+      <p id="distance-label" class="distance-label"></p>
+      <audio id="audio-player" controls preload="none" hidden></audio>
+      <button id="manual-play" class="start-button manual-play" type="button" hidden data-i18n="playNarration">▶　Phát thuyết minh</button>
+    </section>
+
+    <section class="nearby-section">
+      <div class="section-heading"><div><p class="eyebrow" data-i18n="inJourney">TRONG HÀNH TRÌNH</p><h2 data-i18n="poiListTitle">Điểm tham quan</h2></div><span id="poi-count" class="poi-count">0 điểm</span></div>
+      <div id="poi-list" class="poi-list"><p class="empty-message" data-i18n="loadingPois">Đang tải danh sách điểm tham quan...</p></div>
+    </section>
+
+    <footer class="tour-footer" data-i18n="footer">Đến gần một điểm để tự phát thuyết minh, hoặc chạm nút Nghe để chủ động phát bất cứ lúc nào.</footer>
+  </main>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js" crossorigin=""></script>
+  <script src="tour.js?v=27"></script>
+</body>
+</html>
