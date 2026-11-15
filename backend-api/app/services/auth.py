@@ -6,10 +6,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import jwt
-from bson import ObjectId
 from fastapi import HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
+from app.database import Admin, admin_document, parse_id
 
 COOKIE_NAME = "admin_session"
 HASH_ITERATIONS = 310_000
@@ -85,15 +87,26 @@ class AuthService:
             options={"require": ["sub", "exp", "iat", "jti"]},
         )
 
-    async def login(self, database: Any, email: str, password: str) -> tuple[dict[str, Any], str, int]:
-        admin = await database.admins.find_one({"email": email.strip().lower()})
+    async def login(
+        self,
+        database: AsyncSession,
+        email: str,
+        password: str,
+    ) -> tuple[dict[str, Any], str, int]:
+        record = await database.scalar(select(Admin).where(Admin.email == email.strip().lower()))
+        admin = admin_document(record) if record is not None else None
         valid_password = verify_password(password, admin["password_hash"]) if admin else False
         if not admin or not admin.get("is_active", True) or not valid_password:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
         token, expires_at = self._encode_token(admin)
         return admin_response(admin), token, expires_at
 
-    async def get_current_admin(self, database: Any, redis: Any, token: str | None) -> dict[str, Any]:
+    async def get_current_admin(
+        self,
+        database: AsyncSession,
+        redis: Any,
+        token: str | None,
+    ) -> dict[str, Any]:
         unauthorized = HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required",
@@ -105,10 +118,13 @@ class AuthService:
             claims = self.decode_token(token)
             if await redis.get(f"auth:revoked:{claims['jti']}"):
                 raise unauthorized
-            admin_id = ObjectId(claims["sub"])
+            admin_id = parse_id(claims["sub"])
+            if admin_id is None:
+                raise unauthorized
         except (jwt.InvalidTokenError, ValueError, TypeError):
             raise unauthorized from None
-        admin = await database.admins.find_one({"_id": admin_id})
+        record = await database.get(Admin, admin_id)
+        admin = admin_document(record) if record is not None else None
         if not admin or not admin.get("is_active", True):
             raise unauthorized
         return admin

@@ -15,12 +15,13 @@ dependencies = [
     "openpyxl>=3.1",
     "pydantic>=2.9,<2.13",
     "pydantic-settings>=2.6,<2.13",
-    "pymongo>=4.11",
     "PyJWT>=2.9",
     "python-multipart>=0.0.12",
     "qrcode>=8.0",
     "reportlab>=4.2",
     "redis>=5.2",
+    "SQLAlchemy[asyncio]>=2.0",
+    "aioodbc>=0.5",
     "uvicorn>=0.32",
     "websockets>=12",
 ]
@@ -28,11 +29,10 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "fakeredis>=2.26",
-    "mongomock-motor>=0.0.34",
+    "aiosqlite>=0.20",
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
 ]
-
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

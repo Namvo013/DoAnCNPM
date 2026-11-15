@@ -3,5 +3,5 @@ from pydantic import BaseModel
 
 class HealthResponse(BaseModel):
     status: str
-    mongodb: str
+    sql_server: str
     redis: str

@@ -5,6 +5,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.config import get_settings
+from app.database import POI, VisitorLocation
+from sqlalchemy import select, true
+from sqlalchemy.ext.asyncio import AsyncSession
 
 PRESENCE_KEY = "presence:visitors"
 PRESENCE_POI_KEY = "presence:visitor-pois"
@@ -91,7 +94,7 @@ class PresenceService:
         self,
         redis: Any,
         visitor_id: str,
-        database: Any,
+        database: AsyncSession,
         latitude: float | None = None,
         longitude: float | None = None,
         poi_id: str | None = None,
@@ -105,32 +108,39 @@ class PresenceService:
             await redis.hset(PRESENCE_POI_KEY, visitor_id, poi_id)
         if latitude is not None and longitude is not None:
             current_time = datetime.fromtimestamp(now, timezone.utc)
-            await database.visitor_locations.update_one(
-                {"visitor_id": visitor_id},
-                {
-                    "$set": {
-                        "location": {
-                            "type": "Point",
-                            "coordinates": [longitude, latitude],
-                        },
-                        "latitude": latitude,
-                        "longitude": longitude,
-                        "last_seen": current_time,
-                    },
-                    "$setOnInsert": {"created_at": current_time},
-                },
-                upsert=True,
-            )
+            location = await database.get(VisitorLocation, visitor_id)
+            if location is None:
+                location = VisitorLocation(
+                    visitor_id=visitor_id,
+                    latitude=latitude,
+                    longitude=longitude,
+                    last_seen=current_time,
+                    created_at=current_time,
+                )
+                database.add(location)
+            else:
+                location.latitude = latitude
+                location.longitude = longitude
+                location.last_seen = current_time
+            await database.commit()
         count = await self._prune_and_count(redis, now)
         await self._broadcast(redis, count)
         return count
 
-    async def disconnect(self, redis: Any, visitor_id: str, database: Any | None = None) -> int:
+    async def disconnect(
+        self,
+        redis: Any,
+        visitor_id: str,
+        database: AsyncSession | None = None,
+    ) -> int:
         now = time.time()
         await redis.zrem(PRESENCE_KEY, visitor_id)
         await redis.hdel(PRESENCE_POI_KEY, visitor_id)
         if database is not None:
-            await database.visitor_locations.delete_one({"visitor_id": visitor_id})
+            location = await database.get(VisitorLocation, visitor_id)
+            if location is not None:
+                await database.delete(location)
+                await database.commit()
         count = await self._prune_and_count(redis, now)
         await self._broadcast(redis, count)
         return count
@@ -138,17 +148,19 @@ class PresenceService:
     async def online_count(self, redis: Any) -> int:
         return await self._prune_and_count(redis, time.time())
 
-    async def heatmap(self, database: Any) -> dict[str, Any]:
+    async def heatmap(self, database: AsyncSession) -> dict[str, Any]:
         now = datetime.now(timezone.utc)
-        await database.visitor_locations.create_index("last_seen", expireAfterSeconds=60)
-        cursor = database.visitor_locations.find(
-            {"last_seen": {"$gte": now - timedelta(seconds=VISITOR_TIMEOUT_SECONDS)}}
+        visitors = list(
+            await database.scalars(
+                select(VisitorLocation).where(
+                    VisitorLocation.last_seen >= now - timedelta(seconds=VISITOR_TIMEOUT_SECONDS)
+                )
+            )
         )
-        visitors = await cursor.to_list(length=10_000)
         grid_size = get_settings().heatmap_grid_size_meters
         cells: dict[tuple[int, int], dict[str, float | int]] = {}
         for visitor in visitors:
-            latitude, longitude = visitor["latitude"], visitor["longitude"]
+            latitude, longitude = visitor.latitude, visitor.longitude
             x, y = self._project(latitude, longitude)
             cell_key = (math.floor(x / grid_size), math.floor(y / grid_size))
             cell = cells.setdefault(cell_key, {"x": 0.0, "y": 0.0, "count": 0})
@@ -169,20 +181,19 @@ class PresenceService:
                 }
             )
 
-        poi_cursor = database.pois.find({"is_active": True})
-        pois = await poi_cursor.to_list(length=10_000)
+        pois = list(await database.scalars(select(POI).where(POI.is_active == true())))
         poi_crowds = []
         for poi in pois:
-            longitude, latitude = poi["location"]["coordinates"]
+            latitude, longitude = poi.latitude, poi.longitude
             count = sum(
-                _distance_meters((latitude, longitude), (visitor["latitude"], visitor["longitude"]))
-                <= poi["geofence_radius_m"]
+                _distance_meters((latitude, longitude), (visitor.latitude, visitor.longitude))
+                <= poi.geofence_radius_m
                 for visitor in visitors
             )
             poi_crowds.append(
                 {
-                    "poi_id": str(poi["_id"]),
-                    "name": poi["name"],
+                    "poi_id": poi.id,
+                    "name": poi.name,
                     "visitor_count": count,
                     "warning": count > POI_CROWD_THRESHOLD,
                 }

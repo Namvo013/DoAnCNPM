@@ -1,11 +1,11 @@
 import asyncio
 import csv
 import io
+import secrets
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
-from bson import ObjectId
 
 from app.services.auth import hash_password
 
@@ -27,7 +27,7 @@ def seed_report_data(client: TestClient) -> date:
         "/api/auth/login",
         json={"email": "report-viewer@example.com", "password": "report-viewer-password"},
     )
-    poi_id = ObjectId()
+    poi_id = secrets.token_hex(12)
     asyncio.run(
         database.pois.insert_one(
             {

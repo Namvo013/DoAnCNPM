@@ -4,7 +4,6 @@ import secrets
 from typing import Any
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, WebSocket, WebSocketDisconnect
-from bson import ObjectId
 from pydantic import ValidationError
 
 from app.authz import auth_service, has_permission
@@ -33,11 +32,11 @@ async def visitor_presence(
     await websocket.accept()
     visitor_id = secrets.token_urlsafe(18)
     current_poi_id: str | None = None
-    current_poi_object_id: ObjectId | None = None
+    current_poi_object_id: str | None = None
     current_language = selected_language.value
     tasks: set[asyncio.Task[None]] = set()
     registered = False
-    connection_event_id: ObjectId | None = None
+    connection_event_id: str | None = None
 
     async def receive_heartbeats() -> None:
         nonlocal current_poi_id, current_poi_object_id, current_language

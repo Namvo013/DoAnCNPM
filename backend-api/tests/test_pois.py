@@ -1,9 +1,8 @@
 import asyncio
+import secrets
 
-from bson import ObjectId
 from fastapi.testclient import TestClient
 
-from app.services.pois import PoiService
 from app.services.auth import hash_password
 
 
@@ -130,7 +129,7 @@ def test_legacy_child_pois_are_hidden_from_admin_and_public_lists(client: TestCl
         client.app.state.test_database.pois.insert_one(
             {
                 **root,
-                "_id": ObjectId(),
+                "_id": secrets.token_hex(12),
                 "name": "Legacy child",
                 "parent_poi_id": root["_id"],
             }
@@ -194,35 +193,25 @@ def test_poi_rejects_translations_for_unsupported_language(client: TestClient) -
     assert response.status_code == 422
 
 
-def test_distance_search_uses_geo_near_filter() -> None:
-    class Cursor:
-        def limit(self, count: int) -> "Cursor":
-            self.limit_count = count
-            return self
+def test_distance_search_returns_only_pois_within_radius(client: TestClient) -> None:
+    login_as(client)
+    nearby = {
+        **POI_PAYLOAD,
+        "name": "Nearby museum",
+        "coordinates": {"latitude": 10.7, "longitude": 106.6},
+    }
+    distant = {
+        **POI_PAYLOAD,
+        "name": "Distant museum",
+        "coordinates": {"latitude": 10.8, "longitude": 106.6},
+    }
+    assert client.post("/api/admin/pois", json=nearby).status_code == 201
+    assert client.post("/api/admin/pois", json=distant).status_code == 201
 
-        async def to_list(self, length: int) -> list[dict]:
-            return []
+    response = client.get(
+        "/api/pois",
+        params={"latitude": 10.7, "longitude": 106.6, "radius_m": 500},
+    )
 
-    class Collection:
-        def __init__(self) -> None:
-            self.query = None
-            self.index = None
-
-        async def create_index(self, index: list[tuple[str, str]]) -> None:
-            self.index = index
-
-        def find(self, query: dict) -> Cursor:
-            self.query = query
-            return Cursor()
-
-    class Database:
-        def __init__(self) -> None:
-            self.pois = Collection()
-
-    database = Database()
-    items = asyncio.run(PoiService().list_public(database, 20, 10.7, 106.6, 500))
-
-    assert items == []
-    assert database.pois.index == [("location", "2dsphere")]
-    assert database.pois.query["location"]["$near"]["$geometry"]["coordinates"] == [106.6, 10.7]
-    assert database.pois.query["location"]["$near"]["$maxDistance"] == 500
+    assert response.status_code == 200
+    assert [item["name"] for item in response.json()["items"]] == ["Nearby museum"]

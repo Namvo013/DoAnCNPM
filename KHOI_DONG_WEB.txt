@@ -3,35 +3,26 @@ HƯỚNG DẪN KHỞI ĐỘNG LẠI WEB
 Dùng khi tắt máy hoặc đã đóng các cửa sổ Backend/Tunnel.
 Mở 2 cửa sổ PowerShell; nếu cần dùng GPS trên điện thoại thì mở thêm cửa sổ thứ 3.
 
-THƯ MỤC DỰ ÁN
-C:\Users\User\Desktop\TMDNN\Nhom2ThuyetMinhDaNgonNgu
+BƯỚC 1 - KHỞI ĐỘNG SQL SERVER VÀ REDIS
+Cài SQL Server Database Engine và Microsoft ODBC Driver 18 for SQL Server; SQL Server Management Studio (SSMS) chỉ là công cụ quản lý, không thay thế Database Engine.
+Trong SSMS, tạo database tên CNPM nếu chưa có. Connection mẫu trong backend-api\.env dùng Windows Integrated Authentication tới instance localhost\SQLEXPRESS.
 
-BƯỚC 1 - KHỞI ĐỘNG MONGODB (TỰ ĐỘNG)
-MongoDB phải chạy trước Backend. Mở PowerShell bằng quyền Administrator nếu cần.
-Dán nguyên khối lệnh sau để tự kiểm tra, tự bật MongoDB (nếu đang tắt) và kiểm tra kết nối:
+Kiểm tra service SQL Server Express:
+  Get-Service -Name 'MSSQL$SQLEXPRESS'
+Nếu service đã cài nhưng dừng, mở PowerShell bằng quyền Administrator và chạy:
+  Start-Service -Name 'MSSQL$SQLEXPRESS'
+Nếu dùng instance mặc định thay vì Express, service là MSSQLSERVER và cần sửa DATABASE_URL tương ứng.
+Đặt DATABASE_URL trong backend-api\.env trỏ tới database CNPM. Không ghi file .env hoặc mật khẩu lên GitHub. Backend tự tạo các bảng ứng dụng khi khởi động lần đầu.
 
-$svc = Get-Service -Name MongoDB -ErrorAction SilentlyContinue
-if (-not $svc) {
-  Write-Host "Khong tim thay dich vu MongoDB. Hay cai MongoDB Server (Compass chi la cong cu xem du lieu)." -ForegroundColor Red
-} else {
-  if ($svc.Status -ne 'Running') { Start-Service -Name MongoDB; Start-Sleep -Seconds 3 }
-  Get-Service -Name MongoDB | Select-Object Name, Status
-  if (Test-NetConnection -ComputerName localhost -Port 27017 -WarningAction SilentlyContinue) {
-    Write-Host "MongoDB san sang tai mongodb://localhost:27017" -ForegroundColor Green
-  } else {
-    Write-Host "Chua ket noi duoc cong 27017. Cho vai giay roi kiem tra lai." -ForegroundColor Yellow
-  }
-}
+Các dữ liệu cần thiết từ MongoDB cũ đã được chuyển sang database CNPM; dữ liệu MongoDB nguồn vẫn được giữ nguyên để dự phòng.
 
-Backend tự đọc địa chỉ kết nối từ backend-api\.env (MONGODB_URL=mongodb://localhost:27017, cơ sở dữ liệu tour_guide).
 Redis cũng phải chạy theo REDIS_URL trong backend-api\.env (mặc định redis://localhost:6379/0). Kiểm tra nhanh:
   Test-NetConnection -ComputerName localhost -Port 6379
 Nếu TcpTestSucceeded=False, hãy khởi động Redis theo cách đã cài trên máy (dịch vụ hoặc Docker) rồi kiểm tra lại.
-Nếu không tìm thấy dịch vụ MongoDB, hãy kiểm tra MongoDB Server đã được cài đặt và đang chạy. MongoDB Compass chỉ là công cụ xem dữ liệu, không thay thế MongoDB Server.
 
 BƯỚC 2 - KHỞI ĐỘNG BACKEND
 Mở cửa sổ PowerShell thứ nhất và chạy:
-cd C:\Users\User\Desktop\TMDNN\Nhom2ThuyetMinhDaNgonNgu\backend-api
+cd C:\Users\User\OneDrive\Desktop\TMDNN\Nhom2ThuyetMinhDaNgonNgu\backend-api
 & .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 Giữ cửa sổ này mở. Chờ đến khi Uvicorn báo đang chạy.
@@ -45,7 +36,7 @@ Tài liệu API:   http://localhost:8000/docs
 Kiểm tra dịch vụ: http://localhost:8000/api/health
 
 Backend phục vụ cả trang web; đây là cách khởi động khuyến nghị. Chỉ khi cần phát triển giao diện riêng mới mở thêm cửa sổ PowerShell và chạy:
-cd C:\Users\User\Desktop\TMDNN\Nhom2ThuyetMinhDaNgonNgu\admin-dashboard
+cd C:\Users\User\OneDrive\Desktop\TMDNN\Nhom2ThuyetMinhDaNgonNgu\admin-dashboard
 py -m http.server 5500 --bind 0.0.0.0
 Sau đó mở: http://localhost:5500/login.html
 Không chạy http.server trên cổng 8000 vì cổng này do Backend sử dụng.
@@ -88,12 +79,13 @@ QUAN TRỌNG
 - Tunnel miễn phí là đường dẫn tạm thời; mỗi lần khởi động lại có thể được cấp URL khác. Hãy mở /access-qr trên URL mới để hiển thị mã QR cập nhật.
 - URL Tunnel công khai trên Internet; chỉ dùng thử, không chia sẻ URL. Trang quản trị vẫn cần đăng nhập.
 - Nếu tunnel cũ vẫn chạy, đóng đúng cửa sổ PowerShell đã khởi động tunnel trước khi chạy lại.
-- Tắt cửa sổ Backend hoặc Tunnel sẽ làm web/tunnel tạm thời không truy cập được; dữ liệu MongoDB và tệp ảnh trong thư mục dự án không tự động bị xóa.
+- Tắt cửa sổ Backend hoặc Tunnel sẽ làm web/tunnel tạm thời không truy cập được; dữ liệu SQL Server không tự động bị xóa.
 - Nếu Windows Firewall hỏi, cho phép Python/Uvicorn trên mạng riêng (Private network).
 - Tự động dịch mặc định dùng dịch vụ miễn phí (cần Internet, KHÔNG cần khóa API).
   Nếu muốn chất lượng cao hơn, thêm GEMINI_API_KEY vào backend-api\.env rồi khởi động lại Backend; không gửi khóa API qua chat.
 - Không cần tạo lại .venv mỗi lần khởi động. Chỉ cài mới nếu môi trường Python bị lỗi:
-  cd C:\Users\User\Desktop\TMDNN\Nhom2ThuyetMinhDaNgonNgu\backend-api
+  cd C:\Users\User\OneDrive\Desktop\TMDNN\Nhom2ThuyetMinhDaNgonNgu\backend-api
   py -3 -m venv .venv
   & .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-- Xem MongoDB bằng Compass với kết nối: mongodb://localhost:27017
+- Xem dữ liệu bằng SQL Server Management Studio, kết nối đúng server/instance đã cấu hình trong DATABASE_URL.
+- Dữ liệu cần thiết từ MongoDB cũ đã được chuyển sang SQL Server; giữ MongoDB nguồn làm bản dự phòng.

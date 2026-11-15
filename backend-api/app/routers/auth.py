@@ -1,6 +1,6 @@
 from typing import Any
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, Depends, Response
 
 from app.config import get_settings
 from app.database import get_database, get_redis

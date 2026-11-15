@@ -4,7 +4,7 @@ Backend FastAPI và trang Admin Dashboard HTML/CSS/JavaScript thuần. REST API 
 
 ## Chạy backend trên Windows
 
-Yêu cầu Python 3.10+, MongoDB và Redis đang chạy. Mở PowerShell tại thư mục dự án:
+Yêu cầu Python 3.10+, SQL Server và Redis đang chạy; SQL Server ODBC Driver 18 cần được cài trên máy. Tạo database `CNPM` trong SQL Server trước khi chạy. Mở PowerShell tại thư mục dự án:
 
 ```powershell
 Set-Location .\backend-api
@@ -13,7 +13,7 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 notepad .env
 ```
 
-Dán secret vừa tạo vào `JWT_SECRET` trong `.env`, đặt `ADMIN_SEED_PASSWORD` dài ít nhất 12 ký tự, và kiểm tra URL MongoDB/Redis. Cài dependency, tạo super admin ban đầu và chạy API:
+Dán secret vừa tạo vào `JWT_SECRET` trong `.env`, đặt `ADMIN_SEED_PASSWORD` dài ít nhất 12 ký tự, và kiểm tra `DATABASE_URL`/`REDIS_URL`. Cấu hình mẫu dùng Windows Integrated Authentication tới SQL Server local; nếu dùng SQL login, sửa connection string và mã hóa ký tự đặc biệt trong username/password. Cài dependency, tạo super admin ban đầu và chạy API:
 
 ```powershell
 python -m venv .venv
@@ -24,9 +24,11 @@ python -m venv .venv
 
 API chạy ở `http://localhost:8000`. Kiểm tra `http://localhost:8000/api/health` hoặc mở Swagger `/docs`. Có thể đặt `GEMINI_API_KEY` để bật dịch Gemini. `COOKIE_SECURE=true` chỉ dùng khi triển khai HTTPS.
 
-### Chạy thử không cần MongoDB/Redis
+Khi khởi động, backend tự tạo các bảng nếu database chưa có schema. `DATABASE_URL` có thể trỏ tới SQL Server khác; không commit connection string chứa mật khẩu.
 
-Để xem thử đăng nhập/dashboard trên máy cá nhân mà chưa cài MongoDB và Redis, cài dependencies dev rồi đặt `ENVIRONMENT=development`, `DEMO_MODE=true`, `ADMIN_SEED_EMAIL` thành email thử nghiệm và `ADMIN_SEED_PASSWORD` thành mật khẩu riêng dài ít nhất 12 ký tự trong `.env`. Khởi động API như trên; chế độ demo tự tạo tài khoản khi chạy và dùng cơ sở dữ liệu/cache trong bộ nhớ, nên dữ liệu mất khi dừng server. Chỉ dùng cho máy local; không bật `DEMO_MODE` trong môi trường triển khai.
+### Chạy thử không cần SQL Server/Redis
+
+Để xem thử đăng nhập/dashboard trên máy cá nhân mà chưa cài SQL Server và Redis, cài dependencies dev rồi đặt `ENVIRONMENT=development`, `DEMO_MODE=true`, `ADMIN_SEED_EMAIL` thành email thử nghiệm và `ADMIN_SEED_PASSWORD` thành mật khẩu riêng trong `.env`. Khởi động API như trên; chế độ demo tự tạo tài khoản khi chạy và dùng SQLite/Redis trong bộ nhớ, nên dữ liệu mất khi dừng server. Chỉ dùng cho máy local; không bật `DEMO_MODE` trong môi trường triển khai.
 
 ## Mở Admin Dashboard và trang khách
 
@@ -61,7 +63,7 @@ Từ thư mục dự án:
 .\backend-api\.venv\Scripts\python.exe -m pytest -q .\backend-api\tests
 ```
 
-Test sử dụng `mongomock-motor` và `fakeredis`, không cần MongoDB/Redis đang chạy. Gemini và Edge TTS được kiểm thử qua mock/fake, không gọi dịch vụ thật.
+Test dùng SQLite tạm và `fakeredis`, không cần SQL Server/Redis đang chạy. Gemini và Edge TTS được kiểm thử qua mock/fake, không gọi dịch vụ thật.
 
 ### CI tự động
 
@@ -69,25 +71,25 @@ GitHub Actions tự cài backend cùng dependencies kiểm thử và chạy toà
 
 ### CD lên Render
 
-Blueprint `render.yaml` tạo web service chạy API cùng Admin Dashboard và trang khách. Để bật triển khai tự động:
+Blueprint `render.yaml` tạo web service Docker chạy API cùng Admin Dashboard và trang khách; image có Microsoft ODBC Driver 18. Để bật triển khai tự động:
 
-1. Tạo MongoDB có thể truy cập từ Render (ví dụ MongoDB Atlas) và Redis có TLS; không dùng địa chỉ `localhost` cho dịch vụ triển khai.
-2. Trong Render, chọn **New > Blueprint**, kết nối repository GitHub này và áp dụng `render.yaml`. Điền `MONGODB_URL`, `REDIS_URL`, `ADMIN_SEED_EMAIL` và `ADMIN_SEED_PASSWORD` (ít nhất 12 ký tự). Blueprint tự sinh `JWT_SECRET`; không đưa secret vào repository.
+1. Tạo SQL Server và Redis có thể truy cập từ Render (ví dụ dịch vụ cloud). Mở firewall cho kết nối từ Render; không dùng địa chỉ `localhost`.
+2. Trong Render, chọn **New > Blueprint**, kết nối repository GitHub này và áp dụng `render.yaml`. Điền `DATABASE_URL`, `REDIS_URL`, `ADMIN_SEED_EMAIL` và `ADMIN_SEED_PASSWORD`. Dùng SQL login với quyền tạo/đọc/ghi schema và Redis URL có TLS theo cấu hình nhà cung cấp. Blueprint tự sinh `JWT_SECRET`; không đưa secret vào repository.
 3. Trong GitHub repository, thêm Actions secret `RENDER_DEPLOY_HOOK` với deploy hook URL lấy trong phần Settings của web service Render.
 4. Sau khi service được tạo, đặt `PUBLIC_BASE_URL` và `PUBLIC_APP_URL` trong Environment của Render thành URL HTTPS công khai của service rồi lưu thay đổi.
-5. Tạo super admin một lần bằng cách chạy `python -m app.seed_admin` tại thư mục `backend-api`, với các biến môi trường production được cấu hình trong `.env` trỏ tới MongoDB đã deploy. Không chạy lại sau khi đã có tài khoản admin.
+5. Tạo super admin một lần bằng cách chạy `python -m app.seed_admin` trong môi trường có cùng `DATABASE_URL` production. Không chạy lại sau khi đã có tài khoản admin.
 
 Sau khi cấu hình secret, push lên nhánh mặc định sẽ deploy Render **chỉ khi job test CI thành công**. Nếu chưa thêm secret thì job deploy sẽ bỏ qua; pull request và các nhánh khác không deploy. Health check dùng `/api/health`.
 
-Service mặc định dùng gói Free và lưu file MP3 trong filesystem tạm của instance; các file upload có thể mất khi service khởi động lại hoặc deploy. Dữ liệu chính phải lưu trong MongoDB/Redis bên ngoài; nếu cần giữ file MP3 ổn định, cần cấu hình lưu trữ bền vững riêng trước khi sử dụng production.
+Dữ liệu cần thiết từ MongoDB cũ đã được chuyển vào database SQL Server `CNPM`; database MongoDB nguồn được giữ nguyên để dự phòng. Service Render dùng filesystem tạm cho MP3, nên file có thể mất khi restart/deploy; cần cấu hình lưu trữ bền vững nếu muốn giữ audio production.
 
 ## Checklist kiểm thử thực tế trước khi trình bày
 
-Các test tự động không thay thế việc kiểm thử MongoDB/Redis thật, GPS trên điện thoại hoặc thiết bị phát audio. Chạy thử từng bước và điền kết quả/ngày kiểm tra; không đánh dấu hoàn thành nếu chưa thực hiện.
+Các test tự động không thay thế việc kiểm thử SQL Server/Redis thật, GPS trên điện thoại hoặc thiết bị phát audio. Chạy thử từng bước và điền kết quả/ngày kiểm tra; không đánh dấu hoàn thành nếu chưa thực hiện.
 
 | # | Kịch bản | Kết quả mong đợi | Kết quả thực tế |
 |---|---|---|---|
-| 1 | Khởi động MongoDB, Redis và backend; mở `/api/health` | Health trả về trạng thái `ok`; backend không báo lỗi kết nối | Chưa kiểm tra |
+| 1 | Khởi động SQL Server, Redis và backend; mở `/api/health` | Health trả về trạng thái `ok`; backend không báo lỗi kết nối | Chưa kiểm tra |
 | 2 | Đăng nhập admin bằng tài khoản đã seed | Đăng nhập thành công; trang quản trị hiện theo đúng vai trò | Chưa kiểm tra |
 | 3 | Tạo POI có tọa độ và bán kính geofence | POI được lưu và xuất hiện trên bản đồ/danh sách khách | Chưa kiểm tra |
 | 4 | Thêm nội dung tiếng Việt, tạo hoặc nhập bản dịch, audio; duyệt bản dịch | Nội dung đã xuất bản và audio đúng ngôn ngữ được trả cho khách | Chưa kiểm tra |
@@ -104,7 +106,7 @@ Ngày kiểm thử: __________  Thiết bị/trình duyệt: __________  Ngườ
 
 | Mục | Nội dung                                                                 | Trạng thái |
 | --- | ------------------------------------------------------------------------ | ---------- |
-| A1  | FastAPI, MongoDB/Redis, `.env`, health, CORS                             | Hoàn thành |
+| A1  | FastAPI, SQL Server/Redis, `.env`, health, CORS                           | Hoàn thành |
 | A2  | Login/logout/me với JWT cookie HttpOnly                                  | Hoàn thành |
 | A3  | Bốn vai trò và kiểm tra 403                                              | Hoàn thành |
 | A4  | POI công khai, tìm gần, CRUD, bản dịch và geofence                       | Hoàn thành |
@@ -115,7 +117,7 @@ Ngày kiểm thử: __________  Thiết bị/trình duyệt: __________  Ngườ
 | A11 | CRUD tài khoản admin có bảo vệ thao tác tự thân                          | Hoàn thành |
 | A12 | Báo cáo POI/ngôn ngữ/ngày và CSV/XLSX/PDF                                | Hoàn thành |
 | A13 | Log kết nối, vào POI, rời POI                                            | Hoàn thành |
-| A14 | Pytest theo từng nhóm A1-A13 với fakeredis/mongomock-motor               | Hoàn thành |
+| A14 | Pytest theo từng nhóm A1-A13 với SQLite/fakeredis                         | Hoàn thành |
 | B1  | Login, kiểm tra phiên, logout                                            | Hoàn thành |
 | B2  | Khung dashboard và menu theo quyền                                       | Hoàn thành |
 | B3  | Tổng quan online, POI và realtime                                        | Hoàn thành |
@@ -136,4 +138,4 @@ Ngày kiểm thử: __________  Thiết bị/trình duyệt: __________  Ngườ
 - Ảnh POI dùng URL; upload file chỉ dành cho MP3. Ứng dụng khách và admin được phục vụ chung từ thư mục `admin-dashboard`.
 - Trong trang Điểm tham quan của dashboard, dùng nút “Thêm khu tham quan” để tạo điểm độc lập; dùng “Thêm hiện vật” để tạo hiện vật và bắt buộc chọn khu tham quan cha. Mỗi hiện vật có tọa độ geofence và audio riêng; hệ thống hỗ trợ một cấp cha-con. Trang tour theo dõi geofence từng POI mục tiêu, gửi POI hiện tại trong heartbeat, ghi sự kiện vào/rời POI và tự phát audio xuất bản tương ứng. Khi trình duyệt chặn autoplay sẽ hiện nút phát thủ công. GPS trên trình duyệt di động ngoài localhost yêu cầu HTTPS.
 - Báo cáo tính lượt theo sự kiện `poi_enter`, ngày theo UTC và tính trọn ngày kết thúc. PDF dùng mã POI; CSV/Excel chứa tên POI.
-- Bộ test không xác nhận kết nối MongoDB, Redis, Gemini hoặc Edge TTS thật.
+- Bộ test không xác nhận kết nối SQL Server, Redis, Gemini hoặc Edge TTS thật.

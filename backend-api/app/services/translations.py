@@ -3,10 +3,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
-from bson import ObjectId
 from fastapi import HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
+from app.database import POI, Translation, parse_id, poi_document, translation_document
 from app.schemas.poi import SupportedLanguage
 from app.schemas.translations import TARGET_LANGUAGES, TranslationStatus
 
@@ -53,7 +55,12 @@ class TranslationService:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
 
-    async def generate(self, database: Any, poi_id: str, language: SupportedLanguage) -> dict[str, Any]:
+    async def generate(
+        self,
+        database: AsyncSession,
+        poi_id: str,
+        language: SupportedLanguage,
+    ) -> dict[str, Any]:
         if language is SupportedLanguage.VI:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -85,7 +92,7 @@ class TranslationService:
 
     async def update(
         self,
-        database: Any,
+        database: AsyncSession,
         poi_id: str,
         language: SupportedLanguage,
         text: str,
@@ -98,40 +105,56 @@ class TranslationService:
         poi = await self._find_poi(database, poi_id)
         return await self._save_draft(database, poi["_id"], language, text)
 
-    async def get(self, database: Any, poi_id: str, language: SupportedLanguage) -> dict[str, Any]:
+    async def get(
+        self,
+        database: AsyncSession,
+        poi_id: str,
+        language: SupportedLanguage,
+    ) -> dict[str, Any]:
         poi = await self._find_poi(database, poi_id)
-        translation = await database.translations.find_one(
-            {"poi_id": poi["_id"], "language": language.value}
+        translation = await database.scalar(
+            select(Translation).where(
+                Translation.poi_id == poi["_id"],
+                Translation.language == language.value,
+            )
         )
         if translation is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Translation not found")
-        return translation_response(translation)
+        return translation_response(translation_document(translation))
 
-    async def approve(self, database: Any, poi_id: str, language: SupportedLanguage) -> dict[str, Any]:
+    async def approve(
+        self,
+        database: AsyncSession,
+        poi_id: str,
+        language: SupportedLanguage,
+    ) -> dict[str, Any]:
         if language is SupportedLanguage.VI:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Vietnamese is the source language and cannot be approved as a translation",
             )
         poi = await self._find_poi(database, poi_id)
-        translation = await database.translations.find_one(
-            {"poi_id": poi["_id"], "language": language.value}
+        translation = await database.scalar(
+            select(Translation).where(
+                Translation.poi_id == poi["_id"],
+                Translation.language == language.value,
+            )
         )
         if translation is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Translation not found")
         now = datetime.now(timezone.utc)
-        await database.translations.update_one(
-            {"_id": translation["_id"]},
-            {"$set": {"status": TranslationStatus.PUBLISHED.value, "published_at": now, "updated_at": now}},
-        )
-        result = await database.pois.update_one(
-            {"_id": poi["_id"]},
-            {"$set": {f"published_content.{language.value}": translation["text"], "updated_at": now}},
-        )
-        if result.matched_count == 0:
+        translation.status = TranslationStatus.PUBLISHED.value
+        translation.published_at = now
+        translation.updated_at = now
+        poi_record = await database.get(POI, poi["_id"])
+        if poi_record is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="POI not found")
-        translation.update({"status": TranslationStatus.PUBLISHED.value, "published_at": now, "updated_at": now})
-        return translation_response(translation)
+        published = dict(poi_record.published_content or {})
+        published[language.value] = translation.text
+        poi_record.published_content = published
+        poi_record.updated_at = now
+        await database.commit()
+        return translation_response(translation_document(translation))
 
     async def _translate_text(self, text: str, language: SupportedLanguage) -> str:
         if not any(character.isalpha() for character in text):
@@ -226,34 +249,41 @@ class TranslationService:
 
     async def _save_draft(
         self,
-        database: Any,
-        poi_id: ObjectId,
+        database: AsyncSession,
+        poi_id: str,
         language: SupportedLanguage,
         text: str,
     ) -> dict[str, Any]:
         now = datetime.now(timezone.utc)
-        await database.translations.update_one(
-            {"poi_id": poi_id, "language": language.value},
-            {
-                "$set": {
-                    "text": text,
-                    "status": TranslationStatus.DRAFT.value,
-                    "updated_at": now,
-                    "published_at": None,
-                },
-                "$setOnInsert": {"created_at": now},
-            },
-            upsert=True,
+        translation = await database.scalar(
+            select(Translation).where(
+                Translation.poi_id == poi_id,
+                Translation.language == language.value,
+            )
         )
-        document = await database.translations.find_one(
-            {"poi_id": poi_id, "language": language.value}
-        )
-        return translation_response(document)
+        if translation is None:
+            translation = Translation(
+                poi_id=poi_id,
+                language=language.value,
+                text=text,
+                status=TranslationStatus.DRAFT.value,
+                created_at=now,
+                updated_at=now,
+                published_at=None,
+            )
+            database.add(translation)
+        else:
+            translation.text = text
+            translation.status = TranslationStatus.DRAFT.value
+            translation.updated_at = now
+            translation.published_at = None
+        await database.commit()
+        await database.refresh(translation)
+        return translation_response(translation_document(translation))
 
-    async def _find_poi(self, database: Any, poi_id: str) -> dict[str, Any]:
-        if not ObjectId.is_valid(poi_id):
+    async def _find_poi(self, database: AsyncSession, poi_id: str) -> dict[str, Any]:
+        valid_id = parse_id(poi_id)
+        poi = await database.get(POI, valid_id) if valid_id else None
+        if poi is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="POI not found")
-        document = await database.pois.find_one({"_id": ObjectId(poi_id)})
-        if document is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="POI not found")
-        return document
+        return poi_document(poi)

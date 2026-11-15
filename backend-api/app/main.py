@@ -1,5 +1,4 @@
 import asyncio
-import inspect
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -10,11 +9,13 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pymongo import AsyncMongoClient
 from redis.exceptions import RedisError
 from redis.asyncio import Redis
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import get_settings
+from app.database import Admin, Base
 from app.routers.auth import router as auth_router
 from app.routers.audio import router as audio_router
 from app.routers.admin_accounts import router as admin_accounts_router
@@ -51,38 +52,53 @@ async def cleanup_stale_visitors(redis: Redis) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    if settings.demo_mode:
-        if settings.environment.lower() != "development":
-            raise RuntimeError("DEMO_MODE is only available when ENVIRONMENT=development")
-        from fakeredis.aioredis import FakeRedis
-        from mongomock_motor import AsyncMongoMockClient
+    engine = getattr(app.state, "database_engine", None)
+    if engine is None:
+        if settings.demo_mode:
+            if settings.environment.lower() != "development":
+                raise RuntimeError("DEMO_MODE is only available when ENVIRONMENT=development")
+            from fakeredis.aioredis import FakeRedis
 
-        mongo_client = AsyncMongoMockClient()
-        redis_client = FakeRedis(decode_responses=True)
-        logger.warning("DEMO_MODE enabled: using in-memory MongoDB and Redis substitutes")
+            engine = create_async_engine("sqlite+aiosqlite://")
+            redis_client = FakeRedis(decode_responses=True)
+            logger.warning("DEMO_MODE enabled: using in-memory SQLite and Redis substitutes")
+        else:
+            engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+            redis_client = Redis.from_url(
+                settings.redis_url,
+                decode_responses=True,
+                socket_connect_timeout=3,
+                protocol=2,
+            )
     else:
-        mongo_client = AsyncMongoClient(settings.mongodb_url, serverSelectionTimeoutMS=3000)
-        redis_client = Redis.from_url(
-            settings.redis_url,
-            decode_responses=True,
-            socket_connect_timeout=3,
-            protocol=2,
-        )
-    app.state.mongo_client = mongo_client
-    app.state.database = mongo_client[settings.mongodb_database]
+        redis_client = getattr(app.state, "redis", None)
+        if redis_client is None:
+            redis_client = Redis.from_url(
+                settings.redis_url,
+                decode_responses=True,
+                socket_connect_timeout=3,
+                protocol=2,
+            )
+    app.state.database_engine = engine
+    app.state.session_factory = async_sessionmaker(engine, expire_on_commit=False)
     app.state.redis = redis_client
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
     if settings.demo_mode:
-        await app.state.database.admins.create_index("email", unique=True)
-        await app.state.database.admins.insert_one(
-            {
-                "email": settings.admin_seed_email.strip().lower(),
-                "display_name": "Admin nhóm 2",
-                "role": "super_admin",
-                "is_active": True,
-                "password_hash": hash_password(settings.admin_seed_password),
-                "created_at": datetime.now(timezone.utc),
-            }
-        )
+        async with app.state.session_factory() as session:
+            admin = await session.scalar(select(Admin).where(Admin.email == settings.admin_seed_email.strip().lower()))
+            if admin is None:
+                session.add(
+                    Admin(
+                        email=settings.admin_seed_email.strip().lower(),
+                        display_name="Admin nhóm 2",
+                        role="super_admin",
+                        is_active=True,
+                        password_hash=hash_password(settings.admin_seed_password),
+                        created_at=datetime.now(timezone.utc),
+                    )
+                )
+                await session.commit()
     cleanup_task = None
     if not getattr(app.state, "disable_background_tasks", False):
         cleanup_task = asyncio.create_task(cleanup_stale_visitors(redis_client))
@@ -95,9 +111,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 await cleanup_task
             except asyncio.CancelledError:
                 pass
-        close_result = mongo_client.close()
-        if inspect.isawaitable(close_result):
-            await close_result
+        await engine.dispose()
         await redis_client.aclose()
 
 

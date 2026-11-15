@@ -1,64 +1,70 @@
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Literal
 
-from bson import ObjectId
 from fastapi import HTTPException, status
+from sqlalchemy import select, true
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database import POI, Visit, parse_id
 
 VisitEventType = Literal["visitor_connect", "poi_enter", "poi_leave"]
 
 
 class VisitService:
-    async def record_connection(self, database: Any, visitor_id: str, language: str) -> ObjectId:
-        result = await database.visits.insert_one(
-            {
-                "visitor_id": visitor_id,
-                "event_type": "visitor_connect",
-                "poi_id": None,
-                "language": language,
-                "created_at": datetime.now(timezone.utc),
-            }
+    async def record_connection(self, database: AsyncSession, visitor_id: str, language: str) -> str:
+        event = Visit(
+            visitor_id=visitor_id,
+            event_type="visitor_connect",
+            poi_id=None,
+            language=language,
+            created_at=datetime.now(timezone.utc),
         )
-        return result.inserted_id
+        database.add(event)
+        await database.commit()
+        await database.refresh(event)
+        return event.id
 
     async def update_connection_location(
         self,
-        database: Any,
-        connection_id: ObjectId,
+        database: AsyncSession,
+        connection_id: str,
         latitude: float,
         longitude: float,
     ) -> None:
-        await database.visits.update_one(
-            {"_id": connection_id, "event_type": "visitor_connect"},
-            {"$set": {"latitude": latitude, "longitude": longitude}},
-        )
+        event = await database.get(Visit, connection_id)
+        if event is not None and event.event_type == "visitor_connect":
+            event.latitude = latitude
+            event.longitude = longitude
+            await database.commit()
 
-    async def validate_active_poi(self, database: Any, poi_id: str) -> ObjectId:
-        if not ObjectId.is_valid(poi_id):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="POI not found")
-        object_id = ObjectId(poi_id)
-        poi = await database.pois.find_one({"_id": object_id, "is_active": True})
+    async def validate_active_poi(self, database: AsyncSession, poi_id: str) -> str:
+        valid_id = parse_id(poi_id)
+        poi = await database.scalar(
+            select(POI).where(POI.id == valid_id, POI.is_active == true())
+        ) if valid_id else None
         if poi is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active POI not found")
-        return object_id
+        return poi.id
 
     async def record_poi_event(
         self,
-        database: Any,
+        database: AsyncSession,
         visitor_id: str,
         event_type: VisitEventType,
-        poi_id: ObjectId,
+        poi_id: str,
         language: str,
         latitude: float | None,
         longitude: float | None,
     ) -> None:
-        await database.visits.insert_one(
-            {
-                "visitor_id": visitor_id,
-                "event_type": event_type,
-                "poi_id": poi_id,
-                "language": language,
-                "latitude": latitude,
-                "longitude": longitude,
-                "created_at": datetime.now(timezone.utc),
-            }
+        database.add(
+            Visit(
+                visitor_id=visitor_id,
+                event_type=event_type,
+                poi_id=poi_id,
+                language=language,
+                latitude=latitude,
+                longitude=longitude,
+                created_at=datetime.now(timezone.utc),
+            )
         )
+        await database.commit()

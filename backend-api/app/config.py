@@ -16,8 +16,11 @@ class Settings(BaseSettings):
     environment: str = "development"
     demo_mode: bool = False
     api_prefix: str = "/api"
-    mongodb_url: str = "mongodb://localhost:27017"
-    mongodb_database: str = "tour_guide"
+    database_url: str = (
+        "mssql+aioodbc:///?odbc_connect=DRIVER%3D%7BODBC+Driver+18+for+SQL+Server%7D"
+        "%3BSERVER%3Dlocalhost%5CSQLEXPRESS%3BDATABASE%3DCNPM"
+        "%3BTrusted_Connection%3Dyes%3BTrustServerCertificate%3Dyes"
+    )
     redis_url: str = "redis://localhost:6379/0"
     jwt_secret: str = Field(min_length=32)
     jwt_algorithm: str = "HS256"

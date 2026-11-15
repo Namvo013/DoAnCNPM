@@ -1,11 +1,11 @@
 services:
   - type: web
     name: multilingual-tourist-guide-api
-    runtime: python
+    runtime: docker
     plan: free
     autoDeploy: false
-    buildCommand: python -m pip install -e ./backend-api
-    startCommand: cd backend-api && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    dockerfilePath: ./backend-api/Dockerfile
+    dockerContext: .
     healthCheckPath: /api/health
     envVars:
       - key: PYTHON_VERSION
@@ -16,10 +16,8 @@ services:
         value: "false"
       - key: COOKIE_SECURE
         value: "true"
-      - key: MONGODB_URL
+      - key: DATABASE_URL
         sync: false
-      - key: MONGODB_DATABASE
-        value: tour_guide
       - key: REDIS_URL
         sync: false
       - key: JWT_SECRET

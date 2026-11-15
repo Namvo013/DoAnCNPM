@@ -5,10 +5,11 @@ from pathlib import Path
 from typing import Any
 
 import edge_tts
-from bson import ObjectId
 from fastapi import HTTPException, UploadFile, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
+from app.database import POI, parse_id
 from app.schemas.poi import SupportedLanguage
 
 MAX_AUDIO_BYTES = 20 * 1024 * 1024
@@ -47,12 +48,12 @@ class AudioService:
 
     async def generate(
         self,
-        database: Any,
+        database: AsyncSession,
         poi_id: str,
         language: SupportedLanguage,
     ) -> dict[str, Any]:
         document = await self._find_poi(database, poi_id)
-        text = document.get("content", {}).get(language.value)
+        text = (document.content or {}).get(language.value)
         if not text or not text.strip():
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -74,7 +75,7 @@ class AudioService:
 
     async def upload(
         self,
-        database: Any,
+        database: AsyncSession,
         poi_id: str,
         language: SupportedLanguage,
         file: UploadFile,
@@ -92,10 +93,9 @@ class AudioService:
         audio_url = await self._save_track(database, document, language, filename)
         return {"poi_id": poi_id, "language": language.value, "audio_url": audio_url, "voice": None}
 
-    async def _find_poi(self, database: Any, poi_id: str) -> dict[str, Any]:
-        if not ObjectId.is_valid(poi_id):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="POI not found")
-        document = await database.pois.find_one({"_id": ObjectId(poi_id)})
+    async def _find_poi(self, database: AsyncSession, poi_id: str) -> POI:
+        valid_id = parse_id(poi_id)
+        document = await database.get(POI, valid_id) if valid_id else None
         if document is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="POI not found")
         return document
@@ -110,19 +110,15 @@ class AudioService:
 
     async def _save_track(
         self,
-        database: Any,
-        document: dict[str, Any],
+        database: AsyncSession,
+        document: POI,
         language: SupportedLanguage,
         filename: str,
     ) -> str:
         audio_url = f"/media/{filename}"
-        await database.pois.update_one(
-            {"_id": document["_id"]},
-            {
-                "$set": {
-                    f"audio.{language.value}": audio_url,
-                    "updated_at": datetime.now(timezone.utc),
-                }
-            },
-        )
+        audio = dict(document.audio or {})
+        audio[language.value] = audio_url
+        document.audio = audio
+        document.updated_at = datetime.now(timezone.utc)
+        await database.commit()
         return audio_url

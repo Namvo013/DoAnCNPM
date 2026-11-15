@@ -3,7 +3,6 @@ import io
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
-from bson import ObjectId
 from fastapi import HTTPException, status
 from openpyxl import Workbook
 from openpyxl.styles import Font
@@ -11,14 +10,17 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import POI, Visit
 from app.schemas.analytics import AnalyticsResponse, ExportFormat
 
 
 class AnalyticsService:
     async def count_visitor_connections(
         self,
-        database: Any,
+        database: AsyncSession,
         start: datetime,
         end: datetime,
     ) -> int:
@@ -27,14 +29,23 @@ class AnalyticsService:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="start and end must be timezone-aware and end must be later than start",
             )
-        return await database.visits.count_documents(
-            {
-                "event_type": "visitor_connect",
-                "created_at": {"$gte": start, "$lt": end},
-            }
+        count = await database.scalar(
+            select(func.count())
+            .select_from(Visit)
+            .where(
+                Visit.event_type == "visitor_connect",
+                Visit.created_at >= start,
+                Visit.created_at < end,
+            )
         )
+        return int(count or 0)
 
-    async def summarize(self, database: Any, start_date: date, end_date: date) -> dict[str, Any]:
+    async def summarize(
+        self,
+        database: AsyncSession,
+        start_date: date,
+        end_date: date,
+    ) -> dict[str, Any]:
         if end_date < start_date:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -42,62 +53,64 @@ class AnalyticsService:
             )
         start = datetime.combine(start_date, time.min, timezone.utc)
         end = datetime.combine(end_date + timedelta(days=1), time.min, timezone.utc)
-        query = {
-            "event_type": "poi_enter",
-            "created_at": {"$gte": start, "$lt": end},
-        }
-        total = await database.visits.count_documents(query)
+        conditions = (
+            Visit.event_type == "poi_enter",
+            Visit.created_at >= start,
+            Visit.created_at < end,
+        )
+        total = await database.scalar(
+            select(func.count()).select_from(Visit).where(*conditions)
+        )
+        total = int(total or 0)
         if total == 0:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No visit data for this date range")
 
-        by_poi = await database.visits.aggregate(
-            [
-                {"$match": query},
-                {"$group": {"_id": "$poi_id", "visits": {"$sum": 1}}},
-                {"$sort": {"visits": -1, "_id": 1}},
-            ]
-        ).to_list(length=10_000)
-        by_language = await database.visits.aggregate(
-            [
-                {"$match": query},
-                {"$group": {"_id": "$language", "visits": {"$sum": 1}}},
-                {"$sort": {"visits": -1, "_id": 1}},
-            ]
-        ).to_list(length=100)
-        by_day = await database.visits.aggregate(
-            [
-                {"$match": query},
-                {
-                    "$group": {
-                        "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$created_at"}},
-                        "visits": {"$sum": 1},
-                    }
-                },
-                {"$sort": {"_id": 1}},
-            ]
-        ).to_list(length=3660)
-
-        poi_ids = [document["_id"] for document in by_poi if isinstance(document["_id"], ObjectId)]
-        poi_cursor = database.pois.find({"_id": {"$in": poi_ids}})
-        pois = await poi_cursor.to_list(length=len(poi_ids)) if poi_ids else []
-        poi_names = {str(poi["_id"]): poi["name"] for poi in pois}
+        poi_rows = (
+            await database.execute(
+                select(Visit.poi_id, func.count().label("visits"))
+                .where(*conditions)
+                .group_by(Visit.poi_id)
+                .order_by(func.count().desc(), Visit.poi_id.asc())
+            )
+        ).all()
+        language_rows = (
+            await database.execute(
+                select(Visit.language, func.count().label("visits"))
+                .where(*conditions)
+                .group_by(Visit.language)
+                .order_by(func.count().desc(), Visit.language.asc())
+            )
+        ).all()
+        timestamps = await database.scalars(
+            select(Visit.created_at).where(*conditions).order_by(Visit.created_at)
+        )
+        daily_counts: dict[date, int] = {}
+        for timestamp in timestamps:
+            day = timestamp.date()
+            daily_counts[day] = daily_counts.get(day, 0) + 1
+        poi_ids = [poi_id for poi_id, _ in poi_rows if poi_id is not None]
+        pois = await database.execute(select(POI.id, POI.name).where(POI.id.in_(poi_ids))) if poi_ids else None
+        poi_names = {poi_id: name for poi_id, name in pois.all()} if pois is not None else {}
         return {
             "start_date": start_date,
             "end_date": end_date,
             "total_visits": total,
             "by_poi": [
                 {
-                    "poi_id": str(item["_id"]) if item["_id"] is not None else "",
-                    "name": poi_names.get(str(item["_id"]), str(item["_id"]) if item["_id"] else "unknown"),
-                    "visits": item["visits"],
+                    "poi_id": poi_id or "",
+                    "name": poi_names.get(poi_id, poi_id or "unknown"),
+                    "visits": visits,
                 }
-                for item in by_poi
+                for poi_id, visits in poi_rows
             ],
             "by_language": [
-                {"language": item["_id"] or "unknown", "visits": item["visits"]}
-                for item in by_language
+                {"language": language or "unknown", "visits": visits}
+                for language, visits in language_rows
             ],
-            "by_day": [{"date": date.fromisoformat(item["_id"]), "visits": item["visits"]} for item in by_day],
+            "by_day": [
+                {"date": day, "visits": visits}
+                for day, visits in sorted(daily_counts.items())
+            ],
         }
 
     @staticmethod
