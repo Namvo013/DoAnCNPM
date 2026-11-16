@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query, Response
 
 from app.authz import require_permission
 from app.database import get_database
-from app.schemas.analytics import AnalyticsResponse, ExportFormat
+from app.schemas.analytics import AnalyticsResponse, ExportFormat, WeeklyVisitorResponse
 from app.services.analytics import AnalyticsService
 
 router = APIRouter(prefix="/admin/reports", tags=["admin analytics"])
@@ -32,6 +32,14 @@ async def get_visitor_count(
     return {
         "total_visits": await analytics_service.count_visitor_connections(database, start, end),
     }
+
+
+@router.get("/weekly-visitors", response_model=WeeklyVisitorResponse)
+async def get_weekly_visitors(
+    database: Any = Depends(get_database),
+    _: dict[str, Any] = Depends(require_permission("visitor:read")),
+) -> WeeklyVisitorResponse:
+    return WeeklyVisitorResponse(**await analytics_service.weekly_visitor_counts(database))
 
 
 @router.get(

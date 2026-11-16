@@ -26,6 +26,15 @@ class DailyVisitSummary(BaseModel):
     visits: int
 
 
+class DailyVisitorCount(BaseModel):
+    date: date
+    visitors: int
+
+
+class WeeklyVisitorResponse(BaseModel):
+    days: list[DailyVisitorCount]
+
+
 class AnalyticsResponse(BaseModel):
     start_date: date
     end_date: date

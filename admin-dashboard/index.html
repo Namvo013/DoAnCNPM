@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0b0b0b">
   <title>Quản trị | Du lịch đa ngôn ngữ</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
-  <link rel="stylesheet" href="styles.css?v=15">
+  <link rel="stylesheet" href="styles.css?v=16">
 </head>
 <body>
   <div class="app-shell">
@@ -40,6 +40,7 @@
           <article class="stat-card" id="stat-visits-card" hidden><span class="stat-icon">↗</span><p>Lượt truy cập hôm nay</p><strong id="stat-visits">—</strong><small>Số phiên kết nối trong ngày</small></article>
           <article class="stat-card"><span class="stat-icon">⌖</span><p>Điểm tham quan</p><strong id="stat-pois">—</strong><small>Điểm đang hoạt động</small></article>
         </div>
+        <article class="panel" id="weekly-visitors-panel" hidden><div class="panel-heading"><div><p class="eyebrow">LƯỢT KHÁCH KẾT NỐI</p><h2>Dao động du khách trong 7 ngày</h2><p class="muted">Mỗi lần khách kết nối được tính là một lượt; ngày không có khách hiển thị 0.</p></div><button id="weekly-visitors-refresh" class="button button-outline" type="button">Làm mới</button></div><p id="weekly-visitors-status" class="map-status" role="status"></p><canvas id="weekly-visitors-chart" aria-label="Biểu đồ lượt khách kết nối trong 7 ngày gần nhất"></canvas></article>
         <article class="panel"><div class="panel-heading"><div><p class="eyebrow">VẬN HÀNH</p><h2>Trạng thái kết nối</h2></div><span class="live-badge"><i></i> REALTIME</span></div><div class="connection-summary"><span id="overview-connection">Đang chờ kết nối WebSocket...</span><span id="overview-updated" class="muted"></span></div></article>
       </section>
 
@@ -102,6 +103,6 @@
   <div id="toast-region" class="toast-region" aria-live="polite"></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script src="dashboard.js?v=22"></script>
+  <script src="dashboard.js?v=24"></script>
 </body>
 </html>

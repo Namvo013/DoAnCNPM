@@ -18,6 +18,38 @@ from app.schemas.analytics import AnalyticsResponse, ExportFormat
 
 
 class AnalyticsService:
+    async def weekly_visitor_counts(
+        self,
+        database: AsyncSession,
+        end_date: date | None = None,
+    ) -> dict[str, list[dict[str, Any]]]:
+        last_day = end_date or datetime.now(timezone.utc).date()
+        first_day = last_day - timedelta(days=6)
+        start = datetime.combine(first_day, time.min, timezone.utc)
+        end = datetime.combine(last_day + timedelta(days=1), time.min, timezone.utc)
+        timestamps = await database.scalars(
+            select(Visit.created_at).where(
+                Visit.event_type == "visitor_connect",
+                Visit.created_at >= start,
+                Visit.created_at < end,
+            )
+        )
+        daily_counts: dict[date, int] = {}
+        for timestamp in timestamps:
+            timestamp_utc = (
+                timestamp.replace(tzinfo=timezone.utc)
+                if timestamp.tzinfo is None
+                else timestamp.astimezone(timezone.utc)
+            )
+            day = timestamp_utc.date()
+            daily_counts[day] = daily_counts.get(day, 0) + 1
+        return {
+            "days": [
+                {"date": first_day + timedelta(days=offset), "visitors": daily_counts.get(first_day + timedelta(days=offset), 0)}
+                for offset in range(7)
+            ]
+        }
+
     async def count_visitor_connections(
         self,
         database: AsyncSession,

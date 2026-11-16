@@ -87,6 +87,18 @@ def test_visitor_count_counts_connection_events_in_requested_time_range(client: 
     assert response.json() == {"total_visits": 1}
 
 
+def test_weekly_visitors_returns_seven_days_and_counts_connections(client: TestClient) -> None:
+    report_date = seed_report_data(client)
+    response = client.get("/api/admin/reports/weekly-visitors")
+
+    assert response.status_code == 200
+    days = response.json()["days"]
+    assert [item["date"] for item in days] == [
+        (report_date - timedelta(days=offset)).isoformat() for offset in range(6, -1, -1)
+    ]
+    assert [item["visitors"] for item in days] == [0, 0, 0, 0, 0, 0, 1]
+
+
 def test_report_exports_csv_excel_and_pdf(client: TestClient) -> None:
     report_date = seed_report_data(client)
     common_params = {"start_date": report_date.isoformat(), "end_date": report_date.isoformat()}
