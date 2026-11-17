@@ -1,11 +1,11 @@
 import re
 import secrets
 from collections.abc import AsyncIterator
-from datetime import datetime
+from datetime import date, datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException, Request, WebSocket, status
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, Unicode, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, Unicode, UniqueConstraint
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -71,6 +71,15 @@ class Translation(Base):
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class Visitor(Base):
+    __tablename__ = "visitors"
+
+    visitor_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    disconnected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class Visit(Base):
     __tablename__ = "visits"
     __table_args__ = (
@@ -79,7 +88,11 @@ class Visit(Base):
     )
 
     id: Mapped[str] = mapped_column(String(24), primary_key=True, default=lambda: secrets.token_hex(12))
-    visitor_id: Mapped[str] = mapped_column(String(128))
+    visitor_id: Mapped[str] = mapped_column(
+        String(128),
+        ForeignKey("visitors.visitor_id", name="fk_visits_visitor_id_visitors"),
+        nullable=False,
+    )
     event_type: Mapped[str] = mapped_column(String(32))
     poi_id: Mapped[str | None] = mapped_column(
         String(24), ForeignKey("pois.id", ondelete="SET NULL"), nullable=True
@@ -94,11 +107,31 @@ class Visit(Base):
 class VisitorLocation(Base):
     __tablename__ = "visitor_locations"
 
-    visitor_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    visitor_id: Mapped[str] = mapped_column(
+        String(128),
+        ForeignKey("visitors.visitor_id", name="fk_visitor_locations_visitor_id_visitors"),
+        primary_key=True,
+    )
     latitude: Mapped[float] = mapped_column(Float)
     longitude: Mapped[float] = mapped_column(Float)
     last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ReportExport(Base):
+    __tablename__ = "report_exports"
+    __table_args__ = (Index("ix_report_exports_exported_at", "exported_at"),)
+
+    id: Mapped[str] = mapped_column(String(24), primary_key=True, default=lambda: secrets.token_hex(12))
+    admin_id: Mapped[str | None] = mapped_column(
+        String(24), ForeignKey("admins.id", ondelete="SET NULL"), nullable=True
+    )
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    format: Mapped[str] = mapped_column(String(8), nullable=False)
+    exported_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
 
 
 def parse_id(value: str) -> str | None:

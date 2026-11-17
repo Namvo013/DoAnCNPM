@@ -50,8 +50,13 @@ let weeklyVisitorsChart;
 let websocket;
 let reconnectTimer;
 let visitorCountRefreshTimer;
+let heatMapRealtimeRefreshTimer;
+let heatMapRequestInProgress = false;
+let heatMapRefreshRequested = false;
+let lastHeatMapRefreshAt = 0;
 let visitorCountErrorShown = false;
 let lastOnlineCount = null;
+const HEATMAP_REALTIME_REFRESH_INTERVAL_MS = 5000;
 
 const byId = (id) => document.getElementById(id);
 const hasPermission = (permission) =>
@@ -188,6 +193,7 @@ function showSection(section) {
   }
   if (section === "reports") {
     if (!byId("report-start").value) setReportDates();
+    loadReport();
   }
   if (section === "admins") loadAdmins();
 }
@@ -284,8 +290,8 @@ async function loadWeeklyVisitors() {
         datasets: [{
           label: "Lượt khách",
           data: days.map(({ visitors }) => visitors),
-          borderColor: "#ffc107",
-          backgroundColor: "#ffc107aa",
+          borderColor: "#ff07e6",
+          backgroundColor: "#0ff1d3aa",
           borderWidth: 1,
           borderRadius: 6,
         }],
@@ -298,7 +304,7 @@ async function loadWeeklyVisitors() {
           x: { ticks: { color: "#b9b9b9" }, grid: { color: "#292929" } },
           y: {
             beginAtZero: true,
-            ticks: { precision: 0, color: "#b9b9b9" },
+            ticks: { stepSize: 1,precision: 0, color: "#b9b9b9" },
             grid: { color: "#292929" },
           },
         },
@@ -997,7 +1003,15 @@ async function initializeHeatMap() {
 }
 
 async function loadHeatmap() {
+  window.clearTimeout(heatMapRealtimeRefreshTimer);
+  heatMapRealtimeRefreshTimer = null;
+  lastHeatMapRefreshAt = Date.now();
   if (!hasPermission("heatmap:read")) return;
+  if (heatMapRequestInProgress) {
+    heatMapRefreshRequested = true;
+    return;
+  }
+  heatMapRequestInProgress = true;
   try {
     const data = await request("/admin/heatmap");
     await initializeHeatMap();
@@ -1044,7 +1058,26 @@ async function loadHeatmap() {
   } catch (error) {
     byId("heatmap-map-status").textContent = `Không tải được bản đồ giám sát: ${error.message}`;
     showToast(error.message, true);
+  } finally {
+    heatMapRequestInProgress = false;
+    if (heatMapRefreshRequested) {
+      heatMapRefreshRequested = false;
+      scheduleRealtimeHeatmapRefresh();
+    }
   }
+}
+
+function scheduleRealtimeHeatmapRefresh() {
+  if (!byId("section-monitor").classList.contains("active")) return;
+  if (heatMapRealtimeRefreshTimer !== null) return;
+  const delay = Math.max(
+    0,
+    HEATMAP_REALTIME_REFRESH_INTERVAL_MS - (Date.now() - lastHeatMapRefreshAt),
+  );
+  heatMapRealtimeRefreshTimer = window.setTimeout(() => {
+    heatMapRealtimeRefreshTimer = null;
+    if (byId("section-monitor").classList.contains("active")) loadHeatmap();
+  }, delay);
 }
 
 function renderPoiPresence(poiCounts = []) {
@@ -1069,8 +1102,8 @@ function setReportDates() {
 async function loadReport() {
   const start = byId("report-start").value;
   const end = byId("report-end").value;
-  if (start > end) {
-    showToast("Ngày bắt đầu không được sau ngày kết thúc.", true);
+  if (!start || !end || start > end) {
+    showToast("Hãy chọn khoảng ngày hợp lệ để xem báo cáo.", true);
     return;
   }
   try {
@@ -1248,7 +1281,7 @@ function connectAdminSocket() {
       const counts = new Map((data.poi_counts || []).map((item) => [item.poi_id, item]));
       renderPoiPresence([...counts.values()]);
       setConnection(true, `${data.online} khách đang trực tuyến`);
-      if (byId("section-monitor").classList.contains("active")) loadHeatmap();
+      if (byId("section-monitor").classList.contains("active")) scheduleRealtimeHeatmapRefresh();
     } catch {
       setConnection(false, "Không thể đọc dữ liệu WebSocket");
     }
@@ -1264,6 +1297,7 @@ function connectAdminSocket() {
 window.addEventListener("pagehide", () => {
   window.clearTimeout(reconnectTimer);
   window.clearInterval(visitorCountRefreshTimer);
+  window.clearTimeout(heatMapRealtimeRefreshTimer);
   websocket?.close();
 });
 

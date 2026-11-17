@@ -24,7 +24,7 @@ python -m venv .venv
 
 API chạy ở `http://localhost:8000`. Kiểm tra `http://localhost:8000/api/health` hoặc mở Swagger `/docs`. Có thể đặt `GEMINI_API_KEY` để bật dịch Gemini. `COOKIE_SECURE=true` chỉ dùng khi triển khai HTTPS.
 
-Khi khởi động, backend tự tạo các bảng nếu database chưa có schema. Với SQL Server, Auth/monolith cũng tự chuyển `pois.name` và `pois.category` sang `NVARCHAR` nếu các cột hiện tại vẫn là `VARCHAR`, giúp lưu tiếng Việt có dấu cho dữ liệu mới. Việc chuyển kiểu giữ nguyên dữ liệu đọc được, nhưng các ký tự đã bị thay thành `?` trước đó cần nhập lại. `DATABASE_URL` có thể trỏ tới SQL Server khác; không commit connection string chứa mật khẩu.
+Khi khởi động, backend tự tạo các bảng nếu database chưa có schema. Bảng `visitors` lưu mỗi phiên khách và là bảng cha của `visits` cùng `visitor_locations`; Auth/monolith tự bổ sung các khóa ngoại này và tạo bản ghi visitor cho dữ liệu cũ trước khi áp dụng quan hệ. `report_exports` ghi lại tài khoản, khoảng ngày, định dạng và thời điểm mỗi lần xuất báo cáo; dữ liệu báo cáo vẫn được tổng hợp từ `visits`. Với SQL Server, Auth/monolith cũng tự chuyển `pois.name` và `pois.category` sang `NVARCHAR` nếu các cột hiện tại vẫn là `VARCHAR`, giúp lưu tiếng Việt có dấu cho dữ liệu mới. Việc chuyển kiểu giữ nguyên dữ liệu đọc được, nhưng các ký tự đã bị thay thành `?` trước đó cần nhập lại. `DATABASE_URL` có thể trỏ tới SQL Server khác; không commit connection string chứa mật khẩu.
 
 ### Chạy thử không cần SQL Server/Redis
 

@@ -1,0 +1,271 @@
+GIẢI THÍCH BIỂU ĐỒ CỘT VÀ REALTIME KHÁCH TRỰC TUYẾN
+====================================================
+
+MỤC ĐÍCH
+--------
+Biểu đồ giúp quản trị viên xem số lượt khách kết nối trong 7 ngày gần nhất.
+Mỗi cột đại diện cho một ngày. Số liệu là số lượt kết nối, không phải số
+lượng người duy nhất. Một người kết nối lại nhiều lần có thể được tính thành
+nhiều lượt.
+
+LUỒNG HOẠT ĐỘNG TỔNG QUÁT
+-------------------------
+1. Dashboard gọi API GET /admin/reports/weekly-visitors.
+2. API kiểm tra quyền visitor:read và gọi AnalyticsService.
+3. Service đếm các sự kiện visitor_connect trong bảng Visit, gom theo ngày.
+4. API trả về danh sách 7 ngày và số lượt tương ứng.
+5. JavaScript trên dashboard chuyển ngày thành nhãn hiển thị, rồi dùng
+   Chart.js vẽ biểu đồ cột.
+
+1. BACKEND - TÍNH SỐ LƯỢT THEO NGÀY
+-----------------------------------
+Tệp: backend-api/app/services/analytics.py
+
+Dòng 21-25: Hàm weekly_visitor_counts nhận kết nối database. Tham số
+end_date có thể dùng để chọn ngày kết thúc; nếu không truyền thì dùng ngày
+hiện tại theo giờ Việt Nam (UTC+7).
+
+Dòng 26-29: Tính ngày đầu tiên của khoảng 7 ngày theo giờ Việt Nam, sau đó
+chuyển hai mốc đầu ngày sang UTC để truy vấn database. Điều kiện lọc dùng
+khoảng [start, end): có lấy mốc bắt đầu nhưng không lấy mốc kết thúc. Cách
+này tránh đếm trùng bản ghi đúng vào đầu ngày tiếp theo.
+
+Dòng 30-36: Truy vấn các thời điểm tạo Visit có event_type là
+"visitor_connect", nằm trong khoảng 7 ngày. Đây là dữ liệu gốc để đếm lượt
+khách kết nối.
+
+Dòng 37-45: Duyệt các thời điểm tìm được, chuyển timestamp sang giờ Việt Nam
+rồi cộng dồn số lượt theo ngày trong từ điển daily_counts. Nhờ vậy lượt khách
+sau 0 giờ Việt Nam được tính vào đúng ngày trên biểu đồ, dù thời điểm lưu
+trong database là UTC.
+
+Dòng 46-50: Tạo kết quả gồm đủ 7 ngày. Ngày không có sự kiện được gán giá trị
+0. Kết quả có dạng:
+{
+  "days": [
+    {"date": "YYYY-MM-DD", "visitors": 0}
+  ]
+}
+
+2. BACKEND - API VÀ KIỂM TRA QUYỀN
+----------------------------------
+Tệp: backend-api/app/routers/analytics.py
+
+Dòng 36-42: Endpoint GET /admin/reports/weekly-visitors. FastAPI lấy database
+từ dependency get_database. require_permission("visitor:read") chặn tài khoản
+không có quyền xem thông tin khách. Endpoint gọi weekly_visitor_counts và
+đóng gói kết quả theo WeeklyVisitorResponse trước khi trả về cho frontend.
+
+3. DASHBOARD - TẢI DỮ LIỆU VÀ VẼ BIỂU ĐỒ
+-----------------------------------------
+Tệp: admin-dashboard/dashboard.js
+
+Dòng 211-212: Ẩn hoặc hiện thẻ tổng lượt truy cập và khung biểu đồ dựa theo
+quyền visitor:read. Đây là xử lý giao diện; API vẫn tự kiểm tra quyền riêng.
+
+Dòng 215-218: Khi khởi tạo dashboard, nếu tài khoản có quyền thì gọi
+loadWeeklyVisitors để tải số liệu ban đầu.
+
+Dòng 265-269: Hàm loadWeeklyVisitors hiển thị trạng thái đang tải và gọi API
+GET /admin/reports/weekly-visitors.
+
+Dòng 270-278: Đọc danh sách days từ phản hồi API, chuyển ngày YYYY-MM-DD
+thành nhãn ngày/tháng tiếng Việt để hiển thị trên trục ngang.
+
+Dòng 279: Hủy biểu đồ Chart.js trước đó nếu có. Việc này tránh vẽ chồng biểu
+đồ mới lên biểu đồ cũ khi người dùng bấm làm mới nhiều lần.
+
+Dòng 280-291: Tạo biểu đồ trên canvas có id weekly-visitors-chart. type "bar"
+chỉ định biểu đồ cột; labels là các ngày; data lấy từ trường visitors của
+từng ngày. Các tùy chỉnh tiếp theo điều chỉnh màu cột, viền, bo góc và hiển
+thị trục.
+
+Dòng 292-304: Cấu hình biểu đồ có thể co giãn theo kích thước khung; trục dọc
+bắt đầu từ 0 và hiển thị số nguyên vì số lượt là số đếm.
+
+Dòng 305-309: Nếu tải thành công thì hiện thông báo mô tả. Nếu API lỗi thì
+hiện nội dung lỗi ngay trong khu vực trạng thái của biểu đồ.
+
+Dòng 375: Gắn sự kiện bấm nút weekly-visitors-refresh để gọi lại
+loadWeeklyVisitors và cập nhật biểu đồ.
+
+4. HTML - KHU VỰC HIỂN THỊ
+--------------------------
+Tệp: admin-dashboard/index.html
+
+Dòng 43: Khai báo khung biểu đồ. Tiêu đề và mô tả nói rõ số liệu là lượt
+khách kết nối; nút Làm mới có id weekly-visitors-refresh; phần thông báo có
+id weekly-visitors-status; thẻ canvas có id weekly-visitors-chart để
+Chart.js vẽ biểu đồ.
+
+CÁC Ý CHÍNH ĐỂ TRÌNH BÀY
+------------------------
+- Backend mới là nơi tính số liệu; dashboard chỉ gọi API và hiển thị.
+- Biểu đồ gồm 7 ngày gần nhất, ngày không có khách hiển thị 0.
+- Số liệu là lượt kết nối, không khẳng định mỗi lượt là một người khác nhau.
+- Biểu đồ được tải khi mở dashboard và khi bấm Làm mới; nó không tự cập nhật
+  liên tục theo thời gian thực.
+- Số khách đang trực tuyến là một chỉ số realtime riêng, không phải biểu đồ
+  cột 7 ngày.
+
+
+GIẢI THÍCH CHỨC NĂNG REALTIME KHÁCH ĐANG TRỰC TUYẾN
+====================================================
+
+MỤC ĐÍCH
+--------
+Hiển thị số khách có kết nối đang hoạt động trên dashboard quản trị. Khi
+khách vào hoặc rời khỏi trang, số liệu được cập nhật qua WebSocket thay vì
+phải tải lại cả trang.
+
+LUỒNG HOẠT ĐỘNG TỔNG QUÁT
+-------------------------
+1. Trang khách mở WebSocket đến backend tại /ws/tourist.
+2. Backend tạo visitor_id tạm thời, ghi nhận kết nối trong Redis và gửi thông
+   tin connected về cho trang khách.
+3. Trang khách gửi heartbeat mỗi 15 giây để xác nhận vẫn đang kết nối. Nếu có
+   tọa độ, trang khách cũng gửi vị trí và điểm tham quan hiện tại.
+4. Backend cập nhật thời điểm hoạt động trong Redis, tính lại số khách và phát
+   thông điệp presence qua Redis Pub/Sub.
+5. Dashboard quản trị mở WebSocket /ws/admin, nhận thông điệp presence và cập
+   nhật số khách trên giao diện.
+6. Nếu kết nối WebSocket bị đóng, trang khách và dashboard thử kết nối lại
+   sau khoảng 2 giây.
+
+1. TRANG KHÁCH - KẾT NỐI VÀ GỬI HEARTBEAT
+-----------------------------------------
+Tệp: admin-dashboard/tourist-pwa/tour.js
+
+Dòng 840-860: Hàm connectVisitorSocket tạo kết nối WebSocket đến
+/ws/tourist và gửi ngôn ngữ đang chọn. Khi kết nối thành công, trang cập nhật
+trạng thái hiển thị, bật hiệu ứng kết nối và gửi heartbeat đầu tiên. Khi bị
+ngắt kết nối, trang hiện trạng thái đang kết nối lại và thử kết nối sau 2
+giây.
+
+Dòng 862-874: Hàm sendHeartbeat tạo thông điệp heartbeat gồm điểm tham quan
+hiện tại và ngôn ngữ. Nếu trình duyệt có vị trí GPS thì gửi thêm latitude và
+longitude. Thông điệp được gửi qua WebSocket chỉ khi socket đang mở.
+
+Dòng 1046: Khi bắt đầu tour, setInterval gọi sendHeartbeat mỗi 15 giây.
+Khoảng thời gian này cũng được backend thông báo trong gói connected.
+
+2. BACKEND - NHẬN KẾT NỐI KHÁCH
+-------------------------------
+Tệp: backend-api/app/routers/presence.py
+
+Dòng 23-31: Khai báo các địa chỉ WebSocket /ws/tourist và /ws/visitors. Hai
+đường dẫn cùng xử lý kết nối khách; backend accept WebSocket và tạo mã
+visitor_id riêng cho kết nối.
+
+Dòng 34-95: Hàm receive_heartbeats liên tục đọc heartbeat. Backend kiểm tra
+dữ liệu, cập nhật ngôn ngữ và tọa độ; nếu điểm tham quan thay đổi thì ghi
+nhận sự kiện rời/vào điểm. Sau đó gọi PresenceService.heartbeat để cập
+nhật trạng thái Redis.
+
+Dòng 96-121: Khi khách kết nối, backend ghi nhận sự kiện kết nối vào Visit,
+đăng ký visitor trong Redis và gửi thông điệp connected, gồm visitor_id,
+số khách đang online, ngôn ngữ, chu kỳ heartbeat 15 giây và ngưỡng quá hạn
+45 giây.
+
+Dòng 122-147: Khi socket đóng, backend hủy các tác vụ còn chạy, ghi nhận việc
+rời điểm nếu cần, xóa khách khỏi danh sách online và phát cập nhật mới.
+
+3. REDIS - LƯU TRẠNG THÁI VÀ PHÁT SỰ KIỆN
+-----------------------------------------
+Tệp: backend-api/app/services/presence.py
+
+Dòng 12-15: Khai báo các khóa Redis. PRESENCE_KEY lưu visitor đang hoạt động;
+PRESENCE_POI_KEY lưu điểm tham quan hiện tại của visitor; PRESENCE_CHANNEL
+là kênh Pub/Sub phát thông điệp cập nhật. VISITOR_TIMEOUT_SECONDS = 45 là
+thời gian heartbeat tối đa trước khi xem một kết nối là hết hạn.
+
+Dòng 33-35: _prune_and_count xóa các kết nối có heartbeat cũ hơn 45 giây,
+sau đó đếm số visitor còn lại trong Redis.
+
+Dòng 37-58: _broadcast tính số khách theo từng điểm tham quan và publish
+thông điệp presence gồm tổng số online và số khách tại mỗi điểm.
+
+Dòng 85-92: connect thêm visitor vào Redis với thời điểm hiện tại, tính số
+online và phát thông điệp cập nhật.
+
+Dòng 94-133: heartbeat làm mới thời điểm hoạt động trong Redis, cập nhật
+điểm tham quan và, nếu có GPS, cập nhật vị trí trong database. Sau đó tính
+lại số online và broadcast.
+
+Dòng 135-149: disconnect xóa visitor khỏi danh sách online và điểm tham quan,
+xóa bản ghi vị trí tạm thời nếu có, rồi phát số liệu mới.
+
+4. BACKEND - WEBSOCKET CHO DASHBOARD QUẢN TRỊ
+---------------------------------------------
+Tệp: backend-api/app/routers/presence.py
+
+Dòng 149-165: Khai báo WebSocket /ws/admin và /ws/admin/presence. Backend
+kiểm tra cookie đăng nhập và quyền visitor:read trước khi cho dashboard
+kết nối.
+
+Dòng 166-172: Sau khi chấp nhận kết nối, backend đăng ký lắng nghe kênh Redis
+Pub/Sub và gửi snapshot hiện tại để dashboard có số liệu ngay lập tức, không
+cần đợi sự kiện mới.
+
+Dòng 174-186: Tác vụ stream_updates lắng nghe thông điệp presence và gửi
+cho dashboard. Đồng thời backend kiểm tra lại số online để phát hiện trường
+hợp heartbeat hết hạn mà không có sự kiện ngắt socket rõ ràng.
+
+Dòng 188-207: Tác vụ watch_disconnect đọc WebSocket để biết dashboard đã
+đóng kết nối; các tác vụ nền được hủy và Pub/Sub được đóng khi kết thúc.
+
+5. DASHBOARD - CẬP NHẬT GIAO DIỆN
+---------------------------------
+Tệp: admin-dashboard/dashboard.js
+
+Dòng 1264-1268: connectAdminSocket chỉ mở WebSocket nếu tài khoản có quyền
+visitor:read. Giao thức dùng ws:// trên HTTP và wss:// trên HTTPS.
+
+Dòng 1269-1273: Khi nhận dữ liệu, dashboard đọc JSON, chỉ xử lý thông điệp
+type presence và lấy tổng online. Khi số khách tăng, dashboard tải lại số
+lượt kết nối hôm nay.
+
+Dòng 1274-1283: Cập nhật số online trên dashboard và màn hình giám sát, cập
+nhật bảng số khách theo điểm tham quan, hiện trạng thái kết nối. Nếu đang mở
+màn hình giám sát thì lên lịch tải lại bản đồ nhiệt, không gọi API ngay cho
+mỗi thông điệp heartbeat.
+
+Dòng 1286-1291: Khi WebSocket đóng, dashboard hiện trạng thái mất kết nối và
+thử kết nối lại sau 2 giây. Lỗi socket sẽ đóng kết nối để kích hoạt luồng thử
+kết nối lại.
+
+Các biến trạng thái realtime nằm ở dashboard.js dòng 53-59. Hằng số
+HEATMAP_REALTIME_REFRESH_INTERVAL_MS được đặt là 5000 mili giây.
+
+Hàm loadHeatmap ở dòng 1004 trở đi hủy bộ hẹn giờ cũ, ghi nhận thời điểm tải
+và không cho chạy đồng thời nhiều request bản đồ nhiệt. Nếu đang có request
+chưa xong, nó ghi nhận cần tải lại sau.
+
+Hàm scheduleRealtimeHeatmapRefresh ở dòng 1069 trở đi gộp nhiều yêu cầu cập
+nhật tự động; các lần tải tự động cách nhau tối thiểu 5 giây. Nếu đang có
+request chưa hoàn tất, nó lên lịch một lượt tải mới sau khi request đó kết
+thúc. Bộ đếm online và bảng khách theo điểm tham quan vẫn cập nhật ngay khi
+nhận thông điệp WebSocket.
+
+Khi người dùng tự mở màn hình hoặc bấm Làm mới, loadHeatmap vẫn tải dữ liệu
+theo yêu cầu; bộ hẹn giờ đang chờ được hủy để tránh một lần tải trùng ngay sau đó.
+
+6. DỌN DẸP KẾT NỐI HẾT HẠN
+--------------------------
+Tệp: backend-api/app/main.py
+
+Dòng 109-120: cleanup_stale_visitors chạy lặp lại mỗi 5 giây, gọi snapshot
+để loại các visitor quá hạn và publish số liệu hiện tại. Các lỗi Redis/
+kết nối tạm thời được ghi log để service tiếp tục dọn dẹp ở chu kỳ sau.
+
+CÁC Ý CHÍNH ĐỂ TRÌNH BÀY
+------------------------
+- WebSocket giữ kết nối hai chiều; Redis chia sẻ trạng thái và Pub/Sub gửi
+  cập nhật đến các tiến trình đang lắng nghe.
+- Heartbeat mỗi 15 giây cho backend biết trang khách vẫn hoạt động; quá 45
+  giây không có heartbeat thì kết nối bị xem là hết hạn.
+- Số online là số kết nối hoạt động, không nhất thiết là số người duy nhất.
+- Redis giúp nhiều tiến trình backend cùng đọc/cập nhật một trạng thái chung.
+- Dashboard cần đăng nhập và có quyền visitor:read mới được mở WebSocket admin.
+- Biểu đồ 7 ngày là thống kê lịch sử; số online realtime là trạng thái kết nối
+  tại thời điểm hiện tại. Hai số liệu này khác nhau.

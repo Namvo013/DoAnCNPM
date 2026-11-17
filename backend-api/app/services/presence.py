@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.config import get_settings
-from app.database import POI, VisitorLocation
+from app.database import POI, Visitor, VisitorLocation
 from sqlalchemy import select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -102,6 +102,9 @@ class PresenceService:
         now = time.time()
         await redis.zadd(PRESENCE_KEY, {visitor_id: now})
         await redis.expire(PRESENCE_KEY, VISITOR_TIMEOUT_SECONDS * 2)
+        visitor = await database.get(Visitor, visitor_id)
+        if visitor is not None:
+            visitor.last_seen = datetime.fromtimestamp(now, timezone.utc)
         if poi_id is None:
             await redis.hdel(PRESENCE_POI_KEY, visitor_id)
         else:
@@ -122,6 +125,7 @@ class PresenceService:
                 location.latitude = latitude
                 location.longitude = longitude
                 location.last_seen = current_time
+        if visitor is not None or (latitude is not None and longitude is not None):
             await database.commit()
         count = await self._prune_and_count(redis, now)
         await self._broadcast(redis, count)
@@ -140,6 +144,12 @@ class PresenceService:
             location = await database.get(VisitorLocation, visitor_id)
             if location is not None:
                 await database.delete(location)
+            visitor = await database.get(Visitor, visitor_id)
+            if visitor is not None:
+                disconnected_at = datetime.fromtimestamp(now, timezone.utc)
+                visitor.last_seen = disconnected_at
+                visitor.disconnected_at = disconnected_at
+            if location is not None or visitor is not None:
                 await database.commit()
         count = await self._prune_and_count(redis, now)
         await self._broadcast(redis, count)

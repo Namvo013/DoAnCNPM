@@ -13,23 +13,41 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.config import get_settings
-from app.database import Admin, POI, Visit, VisitorLocation, admin_document, poi_document
+from app.database import Admin, POI, ReportExport, Visit, Visitor, VisitorLocation, admin_document, poi_document
 from app.main import create_app
 
 
 MODEL_BY_COLLECTION = {
     "admins": Admin,
     "pois": POI,
+    "visitors": Visitor,
     "visits": Visit,
     "visitor_locations": VisitorLocation,
+    "report_exports": ReportExport,
 }
 
 
 def _document(model: Any) -> dict[str, Any]:
     if isinstance(model, Admin):
         return admin_document(model)
+    if isinstance(model, ReportExport):
+        return {
+            "_id": model.id,
+            "admin_id": model.admin_id,
+            "start_date": model.start_date,
+            "end_date": model.end_date,
+            "format": model.format,
+            "exported_at": model.exported_at,
+        }
     if isinstance(model, POI):
         return poi_document(model)
+    if isinstance(model, Visitor):
+        return {
+            "visitor_id": model.visitor_id,
+            "first_seen": model.first_seen,
+            "last_seen": model.last_seen,
+            "disconnected_at": model.disconnected_at,
+        }
     if isinstance(model, Visit):
         return {
             "_id": model.id,
@@ -101,6 +119,12 @@ def _model(collection: str, document: dict[str, Any]) -> Any:
         values.setdefault("created_at", datetime.now(timezone.utc))
         if values["poi_id"] is not None:
             values["poi_id"] = str(values["poi_id"])
+    elif collection == "report_exports":
+        values.setdefault("exported_at", datetime.now(timezone.utc))
+    elif collection == "visitors":
+        values.setdefault("first_seen", datetime.now(timezone.utc))
+        values.setdefault("last_seen", values["first_seen"])
+        values.setdefault("disconnected_at", None)
     else:
         values.pop("location", None)
         values.setdefault("created_at", values.get("last_seen", datetime.now(timezone.utc)))
@@ -138,6 +162,7 @@ class TestCollection:
     async def insert_one(self, document: dict[str, Any]) -> SimpleNamespace:
         model = _model(self.collection, document)
         async with self.session_factory() as session:
+            await self._ensure_visitors(session, [model])
             session.add(model)
             await session.commit()
             identifier = getattr(model, "id", getattr(model, "visitor_id", None))
@@ -146,6 +171,7 @@ class TestCollection:
     async def insert_many(self, documents: Any) -> SimpleNamespace:
         models = [_model(self.collection, document) for document in documents]
         async with self.session_factory() as session:
+            await self._ensure_visitors(session, models)
             session.add_all(models)
             await session.commit()
             identifiers = [
@@ -153,6 +179,24 @@ class TestCollection:
                 for model in models
             ]
             return SimpleNamespace(inserted_ids=identifiers)
+
+    async def _ensure_visitors(self, session: Any, models: list[Any]) -> None:
+        visitor_ids = {
+            model.visitor_id
+            for model in models
+            if isinstance(model, (Visit, VisitorLocation))
+        }
+        for visitor_id in visitor_ids:
+            if await session.get(Visitor, visitor_id) is None:
+                session.add(
+                    Visitor(
+                        visitor_id=visitor_id,
+                        first_seen=datetime.now(timezone.utc),
+                        last_seen=datetime.now(timezone.utc),
+                    )
+                )
+        if visitor_ids:
+            await session.flush()
 
     async def find_one(self, query: dict[str, Any]) -> dict[str, Any] | None:
         async with self.session_factory() as session:

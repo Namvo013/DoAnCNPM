@@ -16,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import POI, Visit
 from app.schemas.analytics import AnalyticsResponse, ExportFormat
 
+REPORT_TIMEZONE = timezone(timedelta(hours=7))
+
 
 class AnalyticsService:
     async def weekly_visitor_counts(
@@ -23,10 +25,10 @@ class AnalyticsService:
         database: AsyncSession,
         end_date: date | None = None,
     ) -> dict[str, list[dict[str, Any]]]:
-        last_day = end_date or datetime.now(timezone.utc).date()
+        last_day = end_date or datetime.now(REPORT_TIMEZONE).date()
         first_day = last_day - timedelta(days=6)
-        start = datetime.combine(first_day, time.min, timezone.utc)
-        end = datetime.combine(last_day + timedelta(days=1), time.min, timezone.utc)
+        start = datetime.combine(first_day, time.min, REPORT_TIMEZONE).astimezone(timezone.utc)
+        end = datetime.combine(last_day + timedelta(days=1), time.min, REPORT_TIMEZONE).astimezone(timezone.utc)
         timestamps = await database.scalars(
             select(Visit.created_at).where(
                 Visit.event_type == "visitor_connect",
@@ -41,7 +43,7 @@ class AnalyticsService:
                 if timestamp.tzinfo is None
                 else timestamp.astimezone(timezone.utc)
             )
-            day = timestamp_utc.date()
+            day = timestamp_utc.astimezone(REPORT_TIMEZONE).date()
             daily_counts[day] = daily_counts.get(day, 0) + 1
         return {
             "days": [
@@ -83,8 +85,12 @@ class AnalyticsService:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="end_date must not be earlier than start_date",
             )
-        start = datetime.combine(start_date, time.min, timezone.utc)
-        end = datetime.combine(end_date + timedelta(days=1), time.min, timezone.utc)
+        start = datetime.combine(start_date, time.min, REPORT_TIMEZONE).astimezone(timezone.utc)
+        end = datetime.combine(
+            end_date + timedelta(days=1),
+            time.min,
+            REPORT_TIMEZONE,
+        ).astimezone(timezone.utc)
         conditions = (
             Visit.event_type == "poi_enter",
             Visit.created_at >= start,
@@ -94,8 +100,6 @@ class AnalyticsService:
             select(func.count()).select_from(Visit).where(*conditions)
         )
         total = int(total or 0)
-        if total == 0:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No visit data for this date range")
 
         poi_rows = (
             await database.execute(
@@ -118,7 +122,12 @@ class AnalyticsService:
         )
         daily_counts: dict[date, int] = {}
         for timestamp in timestamps:
-            day = timestamp.date()
+            timestamp_utc = (
+                timestamp.replace(tzinfo=timezone.utc)
+                if timestamp.tzinfo is None
+                else timestamp.astimezone(timezone.utc)
+            )
+            day = timestamp_utc.astimezone(REPORT_TIMEZONE).date()
             daily_counts[day] = daily_counts.get(day, 0) + 1
         poi_ids = [poi_id for poi_id, _ in poi_rows if poi_id is not None]
         pois = await database.execute(select(POI.id, POI.name).where(POI.id.in_(poi_ids))) if poi_ids else None

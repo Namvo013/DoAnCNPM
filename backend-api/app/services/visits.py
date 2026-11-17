@@ -5,7 +5,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import POI, Visit, parse_id
+from app.database import POI, Visit, Visitor, parse_id
 VisitEventType = Literal["visitor_connect", "poi_enter", "poi_leave"]
 
 
@@ -16,12 +16,26 @@ class VisitService:
         visitor_id: str,
         language: str,
     ) -> str:
+        now = datetime.now(timezone.utc)
+        visitor = await database.get(Visitor, visitor_id)
+        if visitor is None:
+            database.add(
+                Visitor(
+                    visitor_id=visitor_id,
+                    first_seen=now,
+                    last_seen=now,
+                )
+            )
+        else:
+            visitor.last_seen = now
+            visitor.disconnected_at = None
+        await database.flush()
         event = Visit(
             visitor_id=visitor_id,
             event_type="visitor_connect",
             poi_id=None,
             language=language,
-            created_at=datetime.now(timezone.utc),
+            created_at=now,
         )
         database.add(event)
         await database.commit()

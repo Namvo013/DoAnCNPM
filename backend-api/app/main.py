@@ -17,7 +17,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
 from app.config import get_settings
-from app.database import Admin, Base, POI
+from app.database import Admin, Base, POI, Visitor, Visit, VisitorLocation
 from app.gateway import InternalServiceAccessMiddleware, create_gateway_router
 from app.routers.auth import router as auth_router
 from app.routers.audio import router as audio_router
@@ -70,6 +70,77 @@ async def ensure_poi_unicode_columns(engine: AsyncEngine) -> None:
         await connection.run_sync(migrate)
 
 
+async def ensure_visitor_foreign_keys(engine: AsyncEngine) -> None:
+    if engine.dialect.name != "mssql":
+        return
+
+    async with engine.begin() as connection:
+        def migrate(sync_connection: Connection) -> None:
+            inspector = inspect(sync_connection)
+            schema = inspector.default_schema_name
+            preparer = sync_connection.dialect.identifier_preparer
+
+            def qualified(name: str) -> str:
+                if schema:
+                    return f"{preparer.quote_schema(schema)}.{preparer.quote(name)}"
+                return preparer.quote(name)
+
+            visitors_table = qualified(Visitor.__tablename__)
+            visitor_sources = (
+                (Visit.__tablename__, "created_at"),
+                (VisitorLocation.__tablename__, "created_at"),
+                (VisitorLocation.__tablename__, "last_seen"),
+            )
+            source_queries = [
+                f"SELECT [visitor_id], [{timestamp_column}] AS [seen_at] "
+                f"FROM {qualified(table_name)}"
+                for table_name, timestamp_column in visitor_sources
+                if inspector.has_table(table_name, schema=schema)
+            ]
+            if source_queries:
+                union_query = " UNION ALL ".join(source_queries)
+                sync_connection.exec_driver_sql(
+                    f"""
+                    INSERT INTO {visitors_table}
+                        ([visitor_id], [first_seen], [last_seen], [disconnected_at])
+                    SELECT source.[visitor_id], MIN(source.[seen_at]), MAX(source.[seen_at]), NULL
+                    FROM ({union_query}) AS source
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM {visitors_table} AS existing
+                        WHERE existing.[visitor_id] = source.[visitor_id]
+                    )
+                    GROUP BY source.[visitor_id]
+                    """
+                )
+
+            for table, column, constraint_name in (
+                (Visit.__tablename__, "visitor_id", "fk_visits_visitor_id_visitors"),
+                (
+                    VisitorLocation.__tablename__,
+                    "visitor_id",
+                    "fk_visitor_locations_visitor_id_visitors",
+                ),
+            ):
+                if not inspector.has_table(table, schema=schema):
+                    continue
+                foreign_keys = inspector.get_foreign_keys(table, schema=schema)
+                if any(
+                    foreign_key.get("referred_table") == Visitor.__tablename__
+                    and foreign_key.get("constrained_columns") == [column]
+                    and foreign_key.get("referred_columns") == ["visitor_id"]
+                    for foreign_key in foreign_keys
+                ):
+                    continue
+                sync_connection.exec_driver_sql(
+                    f"ALTER TABLE {qualified(table)} WITH CHECK ADD CONSTRAINT "
+                    f"{preparer.quote(constraint_name)} FOREIGN KEY "
+                    f"({preparer.quote(column)}) REFERENCES {visitors_table} "
+                    f"({preparer.quote('visitor_id')})"
+                )
+
+        await connection.run_sync(migrate)
+
+
 async def wait_for_schema(engine: AsyncEngine) -> None:
     for attempt in range(30):
         async with engine.connect() as connection:
@@ -80,6 +151,22 @@ async def wait_for_schema(engine: AsyncEngine) -> None:
                     for table in Base.metadata.sorted_tables
                     if not inspector.has_table(table.name, schema=table.schema)
                 ]
+                if not issues:
+                    for table, column in (
+                        (Visit.__tablename__, "visitor_id"),
+                        (VisitorLocation.__tablename__, "visitor_id"),
+                    ):
+                        foreign_keys = inspector.get_foreign_keys(
+                            table,
+                            schema=inspector.default_schema_name,
+                        )
+                        if not any(
+                            foreign_key.get("referred_table") == Visitor.__tablename__
+                            and foreign_key.get("constrained_columns") == [column]
+                            and foreign_key.get("referred_columns") == ["visitor_id"]
+                            for foreign_key in foreign_keys
+                        ):
+                            issues.append(f"{table}.{column} must reference visitors.visitor_id")
                 if sync_connection.dialect.name == "mssql" and not issues:
                     poi_columns = {
                         column["name"]: column
@@ -161,6 +248,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if service_role in {"monolith", "auth"}:
         async with engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
+        await ensure_visitor_foreign_keys(engine)
         await ensure_poi_unicode_columns(engine)
     else:
         await wait_for_schema(engine)

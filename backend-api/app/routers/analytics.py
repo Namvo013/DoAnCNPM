@@ -4,7 +4,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query, Response
 
 from app.authz import require_permission
-from app.database import Visit, get_database
+from app.database import ReportExport, Visit, get_database
 from app.schemas.analytics import AnalyticsResponse, ExportFormat, WeeklyVisitorResponse
 from app.services.analytics import AnalyticsService
 
@@ -61,10 +61,19 @@ def create_analytics_router() -> APIRouter:
         end_date: date,
         format: ExportFormat = Query(),
         database: Any = Depends(get_database),
-        _: dict[str, Any] = Depends(require_permission("analytics:read")),
+        admin: dict[str, Any] = Depends(require_permission("analytics:read")),
     ) -> Response:
         report = AnalyticsResponse(**await analytics_service.summarize(database, start_date, end_date))
         data, media_type, extension = analytics_service.export(report, format)
+        database.add(
+            ReportExport(
+                admin_id=admin["_id"],
+                start_date=start_date,
+                end_date=end_date,
+                format=format.value,
+            )
+        )
+        await database.commit()
         filename = f"tourist-visits-{start_date.isoformat()}-{end_date.isoformat()}.{extension}"
         return Response(
             content=data,

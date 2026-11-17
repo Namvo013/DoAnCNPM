@@ -2,12 +2,14 @@ import asyncio
 import csv
 import io
 import secrets
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 
 from app.services.auth import hash_password
+
+REPORT_TIMEZONE = timezone(timedelta(hours=7))
 
 
 def seed_report_data(client: TestClient) -> date:
@@ -99,6 +101,49 @@ def test_weekly_visitors_returns_seven_days_and_counts_connections(client: TestC
     assert [item["visitors"] for item in days] == [0, 0, 0, 0, 0, 0, 1]
 
 
+def test_weekly_visitors_uses_vietnam_calendar_day_after_utc_midnight(client: TestClient) -> None:
+    database = client.app.state.test_database
+    asyncio.run(
+        database.admins.insert_one(
+            {
+                "email": "timezone-viewer@example.com",
+                "display_name": "Timezone viewer",
+                "role": "analytics_viewer",
+                "is_active": True,
+                "password_hash": hash_password("timezone-viewer-password"),
+            }
+        )
+    )
+    client.post(
+        "/api/auth/login",
+        json={"email": "timezone-viewer@example.com", "password": "timezone-viewer-password"},
+    )
+    today_vn = datetime.now(REPORT_TIMEZONE).date()
+    just_after_midnight_vn = datetime.combine(
+        today_vn,
+        time(hour=0, minute=30),
+        REPORT_TIMEZONE,
+    ).astimezone(timezone.utc)
+    asyncio.run(
+        database.visits.insert_one(
+            {
+                "visitor_id": "utc-boundary-visitor",
+                "event_type": "visitor_connect",
+                "language": "vi",
+                "created_at": just_after_midnight_vn,
+            }
+        )
+    )
+
+    response = client.get("/api/admin/reports/weekly-visitors")
+
+    assert response.status_code == 200
+    today_row = next(
+        item for item in response.json()["days"] if item["date"] == today_vn.isoformat()
+    )
+    assert today_row["visitors"] == 1
+
+
 def test_report_exports_csv_excel_and_pdf(client: TestClient) -> None:
     report_date = seed_report_data(client)
     common_params = {"start_date": report_date.isoformat(), "end_date": report_date.isoformat()}
@@ -120,8 +165,13 @@ def test_report_exports_csv_excel_and_pdf(client: TestClient) -> None:
     assert pdf_response.status_code == 200
     assert pdf_response.content.startswith(b"%PDF")
 
+    exports = asyncio.run(client.app.state.test_database.report_exports.find({}).to_list(10))
+    assert [item["format"] for item in exports] == ["csv", "xlsx", "pdf"]
+    assert all(item["admin_id"] for item in exports)
+    assert all(item["start_date"] == report_date for item in exports)
 
-def test_empty_report_returns_404_and_invalid_range_returns_422(client: TestClient) -> None:
+
+def test_empty_report_returns_zero_and_invalid_range_returns_422(client: TestClient) -> None:
     login_viewer = asyncio.run(
         client.app.state.test_database.admins.insert_one(
             {
@@ -139,13 +189,22 @@ def test_empty_report_returns_404_and_invalid_range_returns_422(client: TestClie
         json={"email": "empty-viewer@example.com", "password": "empty-viewer-password"},
     )
     empty_params = {"start_date": "2026-10-01", "end_date": "2026-10-02"}
-    assert client.get("/api/admin/reports", params=empty_params).status_code == 404
+    response = client.get("/api/admin/reports", params=empty_params)
+    assert response.status_code == 200
+    assert response.json() == {
+        "start_date": "2026-10-01",
+        "end_date": "2026-10-02",
+        "total_visits": 0,
+        "by_poi": [],
+        "by_language": [],
+        "by_day": [],
+    }
     for export_format in ("csv", "xlsx", "pdf"):
         response = client.get(
             "/api/admin/reports/export",
             params={**empty_params, "format": export_format},
         )
-        assert response.status_code == 404
+        assert response.status_code == 200
     invalid = client.get(
         "/api/admin/reports",
         params={"start_date": "2026-10-02", "end_date": "2026-10-01"},

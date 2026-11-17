@@ -1,5 +1,5 @@
 import asyncio
-from datetime import date
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
@@ -78,6 +78,8 @@ def test_connection_entry_and_exit_events_feed_analytics(client: TestClient) -> 
     events = asyncio.run(
         database.visits.find({"visitor_id": visitor_id}).sort("created_at", 1).to_list(length=10)
     )
+    visitor = asyncio.run(database.visitors.find_one({"visitor_id": visitor_id}))
+    assert visitor is not None
     assert [event["event_type"] for event in events] == [
         "visitor_connect",
         "poi_enter",
@@ -89,7 +91,10 @@ def test_connection_entry_and_exit_events_feed_analytics(client: TestClient) -> 
 
     report = client.get(
         "/api/admin/reports",
-        params={"start_date": date.today().isoformat(), "end_date": date.today().isoformat()},
+        params={
+            "start_date": (datetime.now(timezone.utc) + timedelta(hours=7)).date().isoformat(),
+            "end_date": (datetime.now(timezone.utc) + timedelta(hours=7)).date().isoformat(),
+        },
     )
     assert report.status_code == 200
     assert report.json()["total_visits"] == 1
