@@ -1,0 +1,94 @@
+﻿x-backend-environment: &backend-environment
+  DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env.microservices}
+  REDIS_URL: redis://redis:6379/0
+  JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.microservices}
+  INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env.microservices}
+  ENVIRONMENT: production
+  DEMO_MODE: "false"
+  COOKIE_SECURE: "false"
+  ADMIN_SEED_EMAIL: ${ADMIN_SEED_EMAIL:-admin@example.com}
+  ADMIN_SEED_PASSWORD: ${ADMIN_SEED_PASSWORD:-}
+
+services:
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: backend-api/Dockerfile
+    environment:
+      <<: *backend-environment
+      SERVICE_ROLE: auth
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  poi-service:
+    build:
+      context: .
+      dockerfile: backend-api/Dockerfile
+    environment:
+      <<: *backend-environment
+      SERVICE_ROLE: poi
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - poi-uploads:/app/backend-api/uploads
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  presence-service:
+    build:
+      context: .
+      dockerfile: backend-api/Dockerfile
+    environment:
+      <<: *backend-environment
+      SERVICE_ROLE: presence
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: backend-api/Dockerfile
+    environment:
+      <<: *backend-environment
+      SERVICE_ROLE: gateway
+      AUTH_SERVICE_URL: http://auth-service:8000
+      POI_SERVICE_URL: http://poi-service:8000
+      PRESENCE_SERVICE_URL: http://presence-service:8000
+      PUBLIC_BASE_URL: http://localhost:8000
+      PUBLIC_APP_URL: http://localhost:8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      poi-service:
+        condition: service_healthy
+      presence-service:
+        condition: service_healthy
+
+volumes:
+  poi-uploads:

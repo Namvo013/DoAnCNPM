@@ -2,7 +2,10 @@ import asyncio
 import secrets
 
 from fastapi.testclient import TestClient
+from sqlalchemy.dialects import mssql
+from sqlalchemy.schema import CreateTable
 
+from app.database import POI
 from app.services.auth import hash_password
 
 
@@ -14,6 +17,13 @@ POI_PAYLOAD = {
     "category": "museum",
     "content": {"vi": "Bảo tàng và di tích lịch sử."},
 }
+
+
+def test_poi_name_and_category_use_unicode_sql_server_columns() -> None:
+    statement = str(CreateTable(POI.__table__).compile(dialect=mssql.dialect()))
+
+    assert "name NVARCHAR(200)" in statement
+    assert "category NVARCHAR(100)" in statement
 
 
 def login_as(client: TestClient, role: str = "super_admin") -> None:
@@ -41,6 +51,8 @@ def test_admin_can_create_update_and_delete_poi(client: TestClient) -> None:
 
     assert created.status_code == 201
     poi = created.json()
+    assert poi["name"] == POI_PAYLOAD["name"]
+    assert poi["category"] == POI_PAYLOAD["category"]
     assert poi["geofence_radius_m"] == 50
     assert poi["coordinates"]["latitude"] == 10.7685
 

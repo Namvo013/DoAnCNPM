@@ -6,12 +6,16 @@ from sqlalchemy import select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import POI, Visit, parse_id
-
 VisitEventType = Literal["visitor_connect", "poi_enter", "poi_leave"]
 
 
 class VisitService:
-    async def record_connection(self, database: AsyncSession, visitor_id: str, language: str) -> str:
+    async def record_connection(
+        self,
+        database: AsyncSession,
+        visitor_id: str,
+        language: str,
+    ) -> str:
         event = Visit(
             visitor_id=visitor_id,
             event_type="visitor_connect",
@@ -56,15 +60,14 @@ class VisitService:
         latitude: float | None,
         longitude: float | None,
     ) -> None:
-        database.add(
-            Visit(
-                visitor_id=visitor_id,
-                event_type=event_type,
-                poi_id=poi_id,
-                language=language,
-                latitude=latitude,
-                longitude=longitude,
-                created_at=datetime.now(timezone.utc),
-            )
+        event = Visit(
+            visitor_id=visitor_id,
+            event_type=event_type,
+            poi_id=poi_id,
+            language=language,
+            latitude=latitude,
+            longitude=longitude,
+            created_at=datetime.now(timezone.utc),
         )
+        database.add(event)
         await database.commit()

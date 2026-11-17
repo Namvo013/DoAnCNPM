@@ -24,7 +24,7 @@ python -m venv .venv
 
 API chạy ở `http://localhost:8000`. Kiểm tra `http://localhost:8000/api/health` hoặc mở Swagger `/docs`. Có thể đặt `GEMINI_API_KEY` để bật dịch Gemini. `COOKIE_SECURE=true` chỉ dùng khi triển khai HTTPS.
 
-Khi khởi động, backend tự tạo các bảng nếu database chưa có schema. `DATABASE_URL` có thể trỏ tới SQL Server khác; không commit connection string chứa mật khẩu.
+Khi khởi động, backend tự tạo các bảng nếu database chưa có schema. Với SQL Server, Auth/monolith cũng tự chuyển `pois.name` và `pois.category` sang `NVARCHAR` nếu các cột hiện tại vẫn là `VARCHAR`, giúp lưu tiếng Việt có dấu cho dữ liệu mới. Việc chuyển kiểu giữ nguyên dữ liệu đọc được, nhưng các ký tự đã bị thay thành `?` trước đó cần nhập lại. `DATABASE_URL` có thể trỏ tới SQL Server khác; không commit connection string chứa mật khẩu.
 
 ### Chạy thử không cần SQL Server/Redis
 
@@ -67,19 +67,79 @@ Test dùng SQLite tạm và `fakeredis`, không cần SQL Server/Redis đang ch�
 
 ### CI tự động
 
-GitHub Actions tự cài backend cùng dependencies kiểm thử và chạy toàn bộ pytest khi có push, pull request hoặc chạy thủ công từ tab **Actions**. Workflow ở `.github/workflows/backend-ci.yml`.
+GitHub Actions tự cài backend cùng dependencies kiểm thử, chạy toàn bộ pytest và build Docker image khi có push, pull request hoặc chạy thủ công từ tab **Actions**. Workflow ở `.github/workflows/backend-ci.yml`.
+
+### Chạy thử kiến trúc microservice
+
+Backend có thể chạy theo bốn tiến trình: API Gateway, Auth, POI/Nội dung và Presence. Gateway giữ các URL API hiện tại cho frontend rồi gọi Auth/POI/Presence qua HTTP hoặc WebSocket. API báo cáo vẫn chạy trên Gateway và đọc dữ liệu Visit trong SQL Server; không có Analytics Service riêng. Các service dùng `INTERNAL_SERVICE_TOKEN` để từ chối request nghiệp vụ không đi qua gateway.
+
+#### Chạy nhanh trên Windows, không cần Docker
+
+Đảm bảo SQL Server Express `CNPM`, Redis và `backend-api\.venv` đã sẵn sàng; `.env` phải cấu hình SQL Server/Redis và `DEMO_MODE=false`. Mở PowerShell tại thư mục dự án, chạy:
+
+```powershell
+.\start-microservices.ps1
+```
+
+Nếu Windows chặn script do execution policy, chạy một lần:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start-microservices.ps1
+```
+
+Script tự sinh token nội bộ dùng chung, mở Auth, POI, Presence và Gateway trong bốn cửa sổ. Mở `http://localhost:8000/login.html`; dừng từng service bằng `Ctrl+C` trong cửa sổ tương ứng. Không chạy backend nguyên khối cũ cùng lúc vì Gateway cũng cần cổng `8000`.
+
+Để chạy bằng Docker Compose trên máy phát triển:
+
+1. Cài Docker Desktop và bật TCP/IP cho SQL Server. Container Linux không dùng được Windows Integrated Authentication; cần `DATABASE_URL` dùng SQL login tới SQL Server mà máy Docker truy cập được.
+2. Sao chép `.env.microservices.example` thành `.env.microservices`; thay `DATABASE_URL`, `JWT_SECRET`, `INTERNAL_SERVICE_TOKEN` và mật khẩu admin bằng giá trị riêng. Tạo hai secret ngẫu nhiên riêng cho `JWT_SECRET` và `INTERNAL_SERVICE_TOKEN` (có thể chạy `python -c "import secrets; print(secrets.token_urlsafe(48))"` hai lần); giữ cùng một `INTERNAL_SERVICE_TOKEN` cho các service và gateway. Không commit file `.env.microservices`.
+3. Chạy từ thư mục gốc:
+
+   ```powershell
+   docker compose --env-file .env.microservices -f compose.microservices.yaml up --build
+   ```
+
+4. Mở `http://localhost:8000`. Dừng các service bằng `Ctrl+C`; xóa container bằng `docker compose --env-file .env.microservices -f compose.microservices.yaml down`. Volume `poi-uploads` được giữ lại.
+
+Auth service khởi tạo schema SQL Server; POI, Presence và Gateway chờ schema sẵn sàng rồi mới phục vụ request. Các tiến trình dùng chung SQL Server `CNPM` và Redis; không tạo thêm database. API báo cáo được Gateway phục vụ trực tiếp từ bảng Visit hiện có. Các file audio thuộc POI được lưu trong volume riêng của POI service.
+
+Nếu đang dùng SQL Server Express/Redis cài trực tiếp trên Windows và chưa có Docker, có thể chạy bốn tiến trình bằng bốn cửa sổ PowerShell thay vì Compose. Tạo một `INTERNAL_SERVICE_TOKEN` bằng lệnh dưới đây rồi dùng **cùng một giá trị** trong cả bốn cửa sổ:
+
+```powershell
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+Trong mỗi cửa sổ, chạy `Set-Location .\backend-api`, đặt `INTERNAL_SERVICE_TOKEN` thành token vừa tạo và đặt `SERVICE_ROLE` lần lượt là `auth`, `poi`, `presence` hoặc `gateway`. Khởi động từng tiến trình bằng lệnh sau, thay giá trị port:
+
+```powershell
+$env:INTERNAL_SERVICE_TOKEN = "DAN_TOKEN_VAO_DAY"
+$env:SERVICE_ROLE = "auth"
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8101
+```
+
+Dùng port `8101` cho Auth, `8102` cho POI, `8103` cho Presence và `8000` cho Gateway. Khởi động Auth trước để tạo schema, rồi POI và Presence; khởi động Gateway sau cùng. Trong cửa sổ Gateway, đặt thêm:
+
+```powershell
+$env:AUTH_SERVICE_URL = "http://127.0.0.1:8101"
+$env:POI_SERVICE_URL = "http://127.0.0.1:8102"
+$env:PRESENCE_SERVICE_URL = "http://127.0.0.1:8103"
+$env:PUBLIC_BASE_URL = "http://localhost:8000"
+$env:PUBLIC_APP_URL = "http://localhost:8000"
+```
+
+Đảm bảo `.env` đang dùng `DEMO_MODE=false`, `DATABASE_URL` trỏ tới SQL Server `CNPM` và Redis đang chạy. Khi dừng, đóng cả bốn cửa sổ; lệnh Uvicorn nguyên khối cũ vẫn chạy như trước nếu không đặt `SERVICE_ROLE`.
 
 ### CD lên Render
 
-Blueprint `render.yaml` tạo web service Docker chạy API cùng Admin Dashboard và trang khách; image có Microsoft ODBC Driver 18. Để bật triển khai tự động:
+`render.yaml` vẫn mô tả triển khai một backend nguyên khối để giữ cách triển khai cũ. Để triển khai bốn service riêng, dùng Blueprint `render-microservices.yaml`:
 
-1. Tạo SQL Server và Redis có thể truy cập từ Render (ví dụ dịch vụ cloud). Mở firewall cho kết nối từ Render; không dùng địa chỉ `localhost`.
-2. Trong Render, chọn **New > Blueprint**, kết nối repository GitHub này và áp dụng `render.yaml`. Điền `DATABASE_URL`, `REDIS_URL`, `ADMIN_SEED_EMAIL` và `ADMIN_SEED_PASSWORD`. Dùng SQL login với quyền tạo/đọc/ghi schema và Redis URL có TLS theo cấu hình nhà cung cấp. Blueprint tự sinh `JWT_SECRET`; không đưa secret vào repository.
-3. Trong GitHub repository, thêm Actions secret `RENDER_DEPLOY_HOOK` với deploy hook URL lấy trong phần Settings của web service Render.
-4. Sau khi service được tạo, đặt `PUBLIC_BASE_URL` và `PUBLIC_APP_URL` trong Environment của Render thành URL HTTPS công khai của service rồi lưu thay đổi.
-5. Tạo super admin một lần bằng cách chạy `python -m app.seed_admin` trong môi trường có cùng `DATABASE_URL` production. Không chạy lại sau khi đã có tài khoản admin.
+1. Tạo SQL Server và Redis có thể truy cập từ Render. Cấu hình trong firewall quyền truy cập cần thiết; không dùng `localhost` và không mở SQL Server công khai nếu nhà cung cấp có private networking.
+2. Trong Render chọn **New > Blueprint**, kết nối repository và chọn `render-microservices.yaml`. Điền `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `INTERNAL_SERVICE_TOKEN`, `ADMIN_SEED_EMAIL` và `ADMIN_SEED_PASSWORD` cho các service. Các service phải dùng **cùng** database, Redis, JWT secret và internal token. Giữ các giá trị bí mật trong Environment của Render, không commit vào repository.
+3. Gateway lấy host của Auth, POI và Presence service từ Blueprint; người dùng chỉ truy cập URL gateway. Endpoint nghiệp vụ của các service nội bộ yêu cầu token; health check `/api/health` được phép truy cập để Render kiểm tra.
+4. Chạy `python -m app.seed_admin` một lần trong môi trường có cùng `DATABASE_URL` và cấu hình admin production.
+5. Để bật CD cho bốn service, thêm GitHub Actions secrets `RENDER_GATEWAY_DEPLOY_HOOK`, `RENDER_AUTH_DEPLOY_HOOK`, `RENDER_POI_DEPLOY_HOOK` và `RENDER_PRESENCE_DEPLOY_HOOK`, mỗi secret lấy từ đúng service Render. Push lên nhánh mặc định sẽ deploy cả bốn service **chỉ sau khi CI thành công**. Phải cấu hình đủ cả bốn hook; nếu không, workflow sẽ báo lỗi thay vì deploy một phần. Secret `RENDER_DEPLOY_HOOK` cũ vẫn dùng được với Blueprint nguyên khối.
 
-Sau khi cấu hình secret, push lên nhánh mặc định sẽ deploy Render **chỉ khi job test CI thành công**. Nếu chưa thêm secret thì job deploy sẽ bỏ qua; pull request và các nhánh khác không deploy. Health check dùng `/api/health`.
+Các service trên gói Free có thể ngủ khi không có truy cập và cần thời gian khởi động lại. Filesystem Render là tạm thời; cần persistent storage hoặc object storage nếu muốn lưu audio production bền vững qua deploy/restart.
 
 Dữ liệu cần thiết từ MongoDB cũ đã được chuyển vào database SQL Server `CNPM`; database MongoDB nguồn được giữ nguyên để dự phòng. Service Render dùng filesystem tạm cho MP3, nên file có thể mất khi restart/deploy; cần cấu hình lưu trữ bền vững nếu muốn giữ audio production.
 

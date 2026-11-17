@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,11 +12,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from redis.exceptions import RedisError
 from redis.asyncio import Redis
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy import Unicode, inspect, select
+from sqlalchemy.engine import Connection
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
 from app.config import get_settings
-from app.database import Admin, Base
+from app.database import Admin, Base, POI
+from app.gateway import InternalServiceAccessMiddleware, create_gateway_router
 from app.routers.auth import router as auth_router
 from app.routers.audio import router as audio_router
 from app.routers.admin_accounts import router as admin_accounts_router
@@ -35,6 +38,74 @@ from app.services.auth import hash_password
 logger = logging.getLogger(__name__)
 
 
+async def ensure_poi_unicode_columns(engine: AsyncEngine) -> None:
+    if engine.dialect.name != "mssql":
+        return
+
+    async with engine.begin() as connection:
+        def migrate(sync_connection: Connection) -> None:
+            inspector = inspect(sync_connection)
+            schema = inspector.default_schema_name
+            columns = {
+                column["name"]: column
+                for column in inspector.get_columns("pois", schema=schema)
+            }
+            preparer = sync_connection.dialect.identifier_preparer
+            table = (
+                f"{preparer.quote_schema(schema)}.{preparer.quote(POI.__tablename__)}"
+                if schema
+                else preparer.quote(POI.__tablename__)
+            )
+            for name, length in (("name", 200), ("category", 100)):
+                column = columns[name]
+                if isinstance(column["type"], Unicode):
+                    continue
+                quoted_column = preparer.quote(name)
+                nullable = "NULL" if column["nullable"] else "NOT NULL"
+                sync_connection.exec_driver_sql(
+                    f"ALTER TABLE {table} ALTER COLUMN {quoted_column} "
+                    f"NVARCHAR({length}) {nullable}"
+                )
+
+        await connection.run_sync(migrate)
+
+
+async def wait_for_schema(engine: AsyncEngine) -> None:
+    for attempt in range(30):
+        async with engine.connect() as connection:
+            def find_schema_issues(sync_connection: Connection) -> list[str]:
+                inspector = inspect(sync_connection)
+                issues = [
+                    table.name
+                    for table in Base.metadata.sorted_tables
+                    if not inspector.has_table(table.name, schema=table.schema)
+                ]
+                if sync_connection.dialect.name == "mssql" and not issues:
+                    poi_columns = {
+                        column["name"]: column
+                        for column in inspector.get_columns(
+                            POI.__tablename__,
+                            schema=inspector.default_schema_name,
+                        )
+                    }
+                    issues.extend(
+                        f"pois.{name} must use NVARCHAR"
+                        for name in ("name", "category")
+                        if not isinstance(poi_columns[name]["type"], Unicode)
+                    )
+                return issues
+
+            schema_issues = await connection.run_sync(find_schema_issues)
+        if not schema_issues:
+            return
+        if attempt < 29:
+            await asyncio.sleep(1)
+    raise RuntimeError(
+        "Database schema is not ready; start the Auth service to initialize it. "
+        f"Schema issues: {', '.join(schema_issues)}"
+    )
+
+
 async def cleanup_stale_visitors(redis: Redis) -> None:
     presence_service = PresenceService()
     while True:
@@ -52,6 +123,11 @@ async def cleanup_stale_visitors(redis: Redis) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
+    service_role = getattr(app.state, "service_role", "monolith")
+    if service_role != "monolith" and settings.demo_mode:
+        raise RuntimeError("DEMO_MODE is only supported by the monolith application")
+    if service_role in {"auth", "poi", "presence"} and not settings.internal_service_token:
+        raise RuntimeError("Set INTERNAL_SERVICE_TOKEN for independently running services")
     engine = getattr(app.state, "database_engine", None)
     if engine is None:
         if settings.demo_mode:
@@ -82,9 +158,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.database_engine = engine
     app.state.session_factory = async_sessionmaker(engine, expire_on_commit=False)
     app.state.redis = redis_client
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    if settings.demo_mode:
+    if service_role in {"monolith", "auth"}:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        await ensure_poi_unicode_columns(engine)
+    else:
+        await wait_for_schema(engine)
+    if settings.demo_mode and service_role == "monolith":
         async with app.state.session_factory() as session:
             admin = await session.scalar(select(Admin).where(Admin.email == settings.admin_seed_email.strip().lower()))
             if admin is None:
@@ -100,7 +180,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 )
                 await session.commit()
     cleanup_task = None
-    if not getattr(app.state, "disable_background_tasks", False):
+    if service_role in {"monolith", "presence"} and not getattr(app.state, "disable_background_tasks", False):
         cleanup_task = asyncio.create_task(cleanup_stale_visitors(redis_client))
     try:
         yield
@@ -115,9 +195,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await redis_client.aclose()
 
 
-def create_app() -> FastAPI:
+def create_app(service_role: str | None = None) -> FastAPI:
     settings = get_settings()
+    role = service_role or os.getenv("SERVICE_ROLE", "monolith")
+    supported_roles = {"monolith", "gateway", "auth", "poi", "presence"}
+    if role not in supported_roles:
+        raise ValueError(f"SERVICE_ROLE must be one of: {', '.join(sorted(supported_roles))}")
+
     application = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
+    application.state.service_role = role
     allowed_origins = ["http://localhost:8000", "http://localhost:5500"]
     public_app_origin = settings.public_app_url.rstrip("/")
     if public_app_origin not in allowed_origins:
@@ -129,30 +215,53 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    application.include_router(access_qr_router)
+    if role in {"auth", "poi", "presence"}:
+        application.add_middleware(
+            InternalServiceAccessMiddleware,
+            token=settings.internal_service_token,
+        )
+
+    if role in {"monolith", "gateway"}:
+        application.include_router(access_qr_router)
     application.include_router(health_router, prefix=settings.api_prefix)
-    application.include_router(auth_router, prefix=settings.api_prefix)
-    Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
-    application.mount("/media", StaticFiles(directory=settings.upload_dir), name="media")
-    application.include_router(images_router, prefix=settings.api_prefix)
-    application.include_router(audio_router, prefix=settings.api_prefix)
-    application.include_router(translations_router, prefix=settings.api_prefix)
-    application.include_router(translation_preview_router, prefix=settings.api_prefix)
-    application.include_router(presence_router, prefix=settings.api_prefix)
-    application.include_router(root_websocket_router)
-    application.include_router(heatmap_router, prefix=settings.api_prefix)
-    application.include_router(admin_accounts_router, prefix=settings.api_prefix)
-    application.include_router(analytics_router, prefix=settings.api_prefix)
-    application.include_router(public_poi_router, prefix=settings.api_prefix)
-    application.include_router(admin_poi_router, prefix=settings.api_prefix)
-    dashboard_dir = Path(__file__).resolve().parents[2] / "admin-dashboard"
-    experimental_tourist_dir = Path(__file__).resolve().parents[2] / "tourist-pwa"
-    application.mount(
-        "/experimental-tourist",
-        StaticFiles(directory=experimental_tourist_dir, html=True),
-        name="experimental-tourist",
-    )
-    application.mount("/", StaticFiles(directory=dashboard_dir, html=True), name="web")
+
+    if role in {"monolith", "auth"}:
+        application.include_router(auth_router, prefix=settings.api_prefix)
+        application.include_router(admin_accounts_router, prefix=settings.api_prefix)
+
+    if role in {"monolith", "poi"}:
+        application.include_router(images_router, prefix=settings.api_prefix)
+        application.include_router(audio_router, prefix=settings.api_prefix)
+        application.include_router(translations_router, prefix=settings.api_prefix)
+        application.include_router(translation_preview_router, prefix=settings.api_prefix)
+        application.include_router(public_poi_router, prefix=settings.api_prefix)
+        application.include_router(admin_poi_router, prefix=settings.api_prefix)
+
+    if role in {"monolith", "presence"}:
+        application.include_router(presence_router, prefix=settings.api_prefix)
+        application.include_router(root_websocket_router)
+        application.include_router(heatmap_router, prefix=settings.api_prefix)
+
+    if role in {"monolith", "gateway"}:
+        application.include_router(analytics_router, prefix=settings.api_prefix)
+
+    if role in {"monolith", "poi"}:
+        Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
+        application.mount("/media", StaticFiles(directory=settings.upload_dir), name="media")
+
+    if role == "gateway":
+        application.include_router(create_gateway_router(settings))
+
+    if role in {"monolith", "gateway"}:
+        dashboard_dir = Path(__file__).resolve().parents[2] / "admin-dashboard"
+        experimental_tourist_dir = Path(__file__).resolve().parents[2] / "tourist-pwa"
+        application.mount(
+            "/experimental-tourist",
+            StaticFiles(directory=experimental_tourist_dir, html=True),
+            name="experimental-tourist",
+        )
+        application.mount("/", StaticFiles(directory=dashboard_dir, html=True), name="web")
+
     return application
 
 

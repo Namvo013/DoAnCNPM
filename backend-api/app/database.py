@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import HTTPException, Request, WebSocket, status
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, Unicode, UniqueConstraint
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -35,12 +35,12 @@ class POI(Base):
     )
 
     id: Mapped[str] = mapped_column(String(24), primary_key=True, default=lambda: secrets.token_hex(12))
-    name: Mapped[str] = mapped_column(String(200))
+    name: Mapped[str] = mapped_column(Unicode(200))
     latitude: Mapped[float] = mapped_column(Float)
     longitude: Mapped[float] = mapped_column(Float)
     geofence_radius_m: Mapped[int] = mapped_column(Integer)
     image_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
-    category: Mapped[str] = mapped_column(String(100))
+    category: Mapped[str] = mapped_column(Unicode(100))
     content: Mapped[dict[str, str]] = mapped_column(JSON)
     published_content: Mapped[dict[str, str]] = mapped_column(JSON)
     name_translations: Mapped[dict[str, str]] = mapped_column(JSON)

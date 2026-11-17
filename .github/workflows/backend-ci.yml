@@ -30,6 +30,9 @@ jobs:
         working-directory: backend-api
         run: python -m pytest -q
 
+      - name: Build microservice container image
+        run: docker build --tag multilingual-tourist-guide:ci --file backend-api/Dockerfile .
+
   deploy:
     needs: test
     if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
@@ -38,9 +41,33 @@ jobs:
       - name: Trigger Render deployment
         env:
           RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+          RENDER_GATEWAY_DEPLOY_HOOK: ${{ secrets.RENDER_GATEWAY_DEPLOY_HOOK }}
+          RENDER_AUTH_DEPLOY_HOOK: ${{ secrets.RENDER_AUTH_DEPLOY_HOOK }}
+          RENDER_POI_DEPLOY_HOOK: ${{ secrets.RENDER_POI_DEPLOY_HOOK }}
+          RENDER_PRESENCE_DEPLOY_HOOK: ${{ secrets.RENDER_PRESENCE_DEPLOY_HOOK }}
         run: |
-          if [ -z "$RENDER_DEPLOY_HOOK" ]; then
-            echo "::warning::RENDER_DEPLOY_HOOK is not configured; skipping deployment."
-            exit 0
+          hooks=(
+            "$RENDER_GATEWAY_DEPLOY_HOOK"
+            "$RENDER_AUTH_DEPLOY_HOOK"
+            "$RENDER_POI_DEPLOY_HOOK"
+            "$RENDER_PRESENCE_DEPLOY_HOOK"
+          )
+          configured=0
+          for hook in "${hooks[@]}"; do
+            if [ -n "$hook" ]; then
+              configured=$((configured + 1))
+            fi
+          done
+
+          if [ "$configured" -eq 4 ]; then
+            for hook in "${hooks[@]}"; do
+              curl --fail --silent --show-error --request POST "$hook"
+            done
+          elif [ "$configured" -ne 0 ]; then
+            echo "::error::Configure all four Render microservice deploy hooks, or remove all four."
+            exit 1
+          elif [ -n "$RENDER_DEPLOY_HOOK" ]; then
+            curl --fail --silent --show-error --request POST "$RENDER_DEPLOY_HOOK"
+          else
+            echo "::warning::No Render deploy hook is configured; skipping deployment."
           fi
-          curl --fail --silent --show-error --request POST "$RENDER_DEPLOY_HOOK"

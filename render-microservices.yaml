@@ -1,0 +1,139 @@
+services:
+  - type: web
+    name: multilingual-tourist-gateway
+    runtime: docker
+    plan: free
+    autoDeploy: false
+    dockerfilePath: ./backend-api/Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    envVars:
+      - key: SERVICE_ROLE
+        value: gateway
+      - key: ENVIRONMENT
+        value: production
+      - key: DEMO_MODE
+        value: "false"
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: INTERNAL_SERVICE_TOKEN
+        sync: false
+      - key: ADMIN_SEED_EMAIL
+        sync: false
+      - key: ADMIN_SEED_PASSWORD
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: PUBLIC_APP_URL
+        sync: false
+      - key: AUTH_SERVICE_URL
+        fromService:
+          type: web
+          name: multilingual-tourist-auth
+          property: host
+      - key: POI_SERVICE_URL
+        fromService:
+          type: web
+          name: multilingual-tourist-poi
+          property: host
+      - key: PRESENCE_SERVICE_URL
+        fromService:
+          type: web
+          name: multilingual-tourist-presence
+          property: host
+
+  - type: web
+    name: multilingual-tourist-auth
+    runtime: docker
+    plan: free
+    autoDeploy: false
+    dockerfilePath: ./backend-api/Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    envVars:
+      - key: SERVICE_ROLE
+        value: auth
+      - key: ENVIRONMENT
+        value: production
+      - key: DEMO_MODE
+        value: "false"
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: INTERNAL_SERVICE_TOKEN
+        sync: false
+      - key: ADMIN_SEED_EMAIL
+        sync: false
+      - key: ADMIN_SEED_PASSWORD
+        sync: false
+
+  - type: web
+    name: multilingual-tourist-poi
+    runtime: docker
+    plan: free
+    autoDeploy: false
+    dockerfilePath: ./backend-api/Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    envVars:
+      - key: SERVICE_ROLE
+        value: poi
+      - key: ENVIRONMENT
+        value: production
+      - key: DEMO_MODE
+        value: "false"
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: INTERNAL_SERVICE_TOKEN
+        sync: false
+      - key: ADMIN_SEED_EMAIL
+        sync: false
+      - key: ADMIN_SEED_PASSWORD
+        sync: false
+
+  - type: web
+    name: multilingual-tourist-presence
+    runtime: docker
+    plan: free
+    autoDeploy: false
+    dockerfilePath: ./backend-api/Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    envVars:
+      - key: SERVICE_ROLE
+        value: presence
+      - key: ENVIRONMENT
+        value: production
+      - key: DEMO_MODE
+        value: "false"
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: INTERNAL_SERVICE_TOKEN
+        sync: false
+      - key: ADMIN_SEED_EMAIL
+        sync: false
+      - key: ADMIN_SEED_PASSWORD
+        sync: false

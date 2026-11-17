@@ -161,8 +161,6 @@ function setConnection(connected, label) {
   if (!status) return;
   status.classList.toggle("connected", connected);
   byId("connection-label").textContent = label;
-  byId("overview-connection").textContent = label;
-  byId("overview-updated").textContent = connected ? `Cập nhật ${new Date().toLocaleTimeString("vi-VN")}` : "";
 }
 
 function renderNavigation() {
@@ -1249,7 +1247,7 @@ function connectAdminSocket() {
       byId("monitor-online").textContent = data.online;
       const counts = new Map((data.poi_counts || []).map((item) => [item.poi_id, item]));
       renderPoiPresence([...counts.values()]);
-      setConnection(true, `${data.online*2} khách đang trực tuyến`);
+      setConnection(true, `${data.online} khách đang trực tuyến`);
       if (byId("section-monitor").classList.contains("active")) loadHeatmap();
     } catch {
       setConnection(false, "Không thể đọc dữ liệu WebSocket");

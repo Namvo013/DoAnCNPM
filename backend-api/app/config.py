@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     public_base_url: str = "http://localhost:8000"
     public_app_url: str = "http://localhost:5500"
     heatmap_grid_size_meters: int = 250
+    auth_service_url: str = "http://localhost:8101"
+    poi_service_url: str = "http://localhost:8102"
+    presence_service_url: str = "http://localhost:8103"
+    internal_service_token: str = ""
 
     @field_validator("jwt_secret")
     @classmethod
