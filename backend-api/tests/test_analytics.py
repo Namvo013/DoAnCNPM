@@ -41,7 +41,7 @@ def seed_report_data(client: TestClient) -> date:
             }
         )
     )
-    today = date.today()
+    today = datetime.now(REPORT_TIMEZONE).date()
     start = datetime.combine(today, datetime.min.time(), timezone.utc)
     docs = [
         {"event_type": "poi_enter", "poi_id": poi_id, "language": "vi", "created_at": start + timedelta(hours=1)},
