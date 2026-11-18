@@ -35,6 +35,16 @@ class WeeklyVisitorResponse(BaseModel):
     days: list[DailyVisitorCount]
 
 
+class HourlyVisitorCount(BaseModel):
+    hour: int
+    visitors: int
+
+
+class HourlyVisitorResponse(BaseModel):
+    date: date
+    hours: list[HourlyVisitorCount]
+
+
 class AnalyticsResponse(BaseModel):
     start_date: date
     end_date: date

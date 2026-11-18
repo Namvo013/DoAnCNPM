@@ -46,7 +46,7 @@ let heatMapCircles = [];
 let heatMapHasAutoFitted = false;
 let poiChart;
 let dayChart;
-let weeklyVisitorsChart;
+let hourlyVisitorsChart;
 let websocket;
 let reconnectTimer;
 let visitorCountRefreshTimer;
@@ -186,7 +186,7 @@ function showSection(section) {
   byId("page-title").textContent = selected?.[1] || "Tổng quan";
   byId("page-eyebrow").textContent = (selected?.[1] || "TỔNG QUAN").toLocaleUpperCase("vi-VN");
   if (section === "pois") loadPoiPage();
-  if (section === "overview" && hasPermission("visitor:read")) loadWeeklyVisitors();
+  if (section === "overview" && hasPermission("visitor:read")) loadHourlyVisitors();
   if (section === "monitor") {
     loadHeatmap();
     loadPublicPois();
@@ -215,12 +215,12 @@ async function initialize() {
   byId("welcome-name").textContent = displayName;
   byId("add-poi-button").hidden = !hasPermission("poi:write");
   byId("stat-visits-card").hidden = !hasPermission("visitor:read");
-  byId("weekly-visitors-panel").hidden = !hasPermission("visitor:read");
+  byId("hourly-visitors-panel").hidden = !hasPermission("visitor:read");
   renderNavigation();
   bindControls();
   await Promise.allSettled([
     loadOverview(),
-    hasPermission("visitor:read") ? loadWeeklyVisitors() : Promise.resolve(),
+    hasPermission("visitor:read") ? loadHourlyVisitors() : Promise.resolve(),
   ]);
   connectAdminSocket();
   if (hasPermission("visitor:read")) {
@@ -268,28 +268,21 @@ async function refreshVisitorCount() {
   }
 }
 
-async function loadWeeklyVisitors() {
-  const status = byId("weekly-visitors-status");
+async function loadHourlyVisitors() {
+  const status = byId("hourly-visitors-status");
   status.textContent = "Đang tải số liệu...";
   try {
-    const result = await request("/admin/reports/weekly-visitors");
-    const days = result.days || [];
-    const labels = days.map(({ date }) => {
-      const [year, month, day] = date.split("-").map(Number);
-      return new Date(year, month - 1, day).toLocaleDateString("vi-VN", {
-        weekday: "short",
-        day: "2-digit",
-        month: "2-digit",
-      });
-    });
-    weeklyVisitorsChart?.destroy();
-    weeklyVisitorsChart = new Chart(byId("weekly-visitors-chart"), {
+    const result = await request("/admin/reports/hourly-visitors");
+    const hours = result.hours || [];
+    const labels = hours.map(({ hour }) => `${String(hour).padStart(2, "0")}:00`);
+    hourlyVisitorsChart?.destroy();
+    hourlyVisitorsChart = new Chart(byId("hourly-visitors-chart"), {
       type: "bar",
       data: {
         labels,
         datasets: [{
           label: "Lượt khách",
-          data: days.map(({ visitors }) => visitors),
+          data: hours.map(({ visitors }) => visitors),
           borderColor: "#ff07e6",
           backgroundColor: "#0ff1d3aa",
           borderWidth: 1,
@@ -310,7 +303,7 @@ async function loadWeeklyVisitors() {
         },
       },
     });
-    status.textContent = "Thống kê số lượt khách kết nối theo ngày trong 7 ngày gần nhất.";
+    status.textContent = `Thống kê lượt khách kết nối theo giờ hôm nay (${result.date}, giờ Việt Nam).`;
   } catch (error) {
     status.textContent = `Không tải được thống kê: ${error.message}`;
   }
@@ -378,7 +371,7 @@ function bindControls() {
   });
   byId("poi-map-search-results").addEventListener("click", selectPoiMapSearchResult);
   byId("heatmap-refresh").addEventListener("click", loadHeatmap);
-  byId("weekly-visitors-refresh").addEventListener("click", loadWeeklyVisitors);
+  byId("hourly-visitors-refresh").addEventListener("click", loadHourlyVisitors);
   byId("report-form").addEventListener("submit", (event) => { event.preventDefault(); loadReport(); });
   document.querySelector(".export-actions").addEventListener("click", exportReport);
   byId("add-admin-button").addEventListener("click", () => openAdminDialog());

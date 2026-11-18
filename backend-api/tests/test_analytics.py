@@ -144,6 +144,64 @@ def test_weekly_visitors_uses_vietnam_calendar_day_after_utc_midnight(client: Te
     assert today_row["visitors"] == 1
 
 
+def test_hourly_visitors_returns_all_hours_and_counts_today_connections(client: TestClient) -> None:
+    report_date = seed_report_data(client)
+    response = client.get("/api/admin/reports/hourly-visitors")
+
+    assert response.status_code == 200
+    report = response.json()
+    assert report["date"] == report_date.isoformat()
+    assert [item["hour"] for item in report["hours"]] == list(range(24))
+    assert [item["visitors"] for item in report["hours"]] == [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ]
+
+
+def test_hourly_visitors_groups_using_vietnam_local_hour(client: TestClient) -> None:
+    database = client.app.state.test_database
+    asyncio.run(
+        database.admins.insert_one(
+            {
+                "email": "hourly-timezone-viewer@example.com",
+                "display_name": "Hourly timezone viewer",
+                "role": "analytics_viewer",
+                "is_active": True,
+                "password_hash": hash_password("hourly-timezone-viewer-password"),
+            }
+        )
+    )
+    client.post(
+        "/api/auth/login",
+        json={
+            "email": "hourly-timezone-viewer@example.com",
+            "password": "hourly-timezone-viewer-password",
+        },
+    )
+    today_vn = datetime.now(REPORT_TIMEZONE).date()
+    just_after_midnight_vn = datetime.combine(
+        today_vn,
+        time(hour=0, minute=30),
+        REPORT_TIMEZONE,
+    ).astimezone(timezone.utc)
+    asyncio.run(
+        database.visits.insert_one(
+            {
+                "visitor_id": "hourly-utc-boundary-visitor",
+                "event_type": "visitor_connect",
+                "language": "vi",
+                "created_at": just_after_midnight_vn,
+            }
+        )
+    )
+
+    response = client.get("/api/admin/reports/hourly-visitors")
+
+    assert response.status_code == 200
+    midnight_hour = response.json()["hours"][0]
+    assert midnight_hour == {"hour": 0, "visitors": 1}
+
+
 def test_report_exports_csv_excel_and_pdf(client: TestClient) -> None:
     report_date = seed_report_data(client)
     common_params = {"start_date": report_date.isoformat(), "end_date": report_date.isoformat()}

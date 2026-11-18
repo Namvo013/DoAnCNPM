@@ -52,6 +52,38 @@ class AnalyticsService:
             ]
         }
 
+    async def hourly_visitor_counts(
+        self,
+        database: AsyncSession,
+        report_date: date | None = None,
+    ) -> dict[str, Any]:
+        current_date = report_date or datetime.now(REPORT_TIMEZONE).date()
+        start = datetime.combine(current_date, time.min, REPORT_TIMEZONE).astimezone(timezone.utc)
+        end = datetime.combine(current_date + timedelta(days=1), time.min, REPORT_TIMEZONE).astimezone(timezone.utc)
+        timestamps = await database.scalars(
+            select(Visit.created_at).where(
+                Visit.event_type == "visitor_connect",
+                Visit.created_at >= start,
+                Visit.created_at < end,
+            )
+        )
+        hourly_counts = [0] * 24
+        for timestamp in timestamps:
+            timestamp_utc = (
+                timestamp.replace(tzinfo=timezone.utc)
+                if timestamp.tzinfo is None
+                else timestamp.astimezone(timezone.utc)
+            )
+            hour = timestamp_utc.astimezone(REPORT_TIMEZONE).hour
+            hourly_counts[hour] += 1
+        return {
+            "date": current_date,
+            "hours": [
+                {"hour": hour, "visitors": visitors}
+                for hour, visitors in enumerate(hourly_counts)
+            ],
+        }
+
     async def count_visitor_connections(
         self,
         database: AsyncSession,
